@@ -4,6 +4,19 @@ import tabelaTucunduva from '@/data/alimentos/tucunduva.json';
 export type FonteAlimento = 'TACO' | 'Tucunduva' | 'Personalizado';
 export type ValorMicronutriente = number | 'Tr' | null;
 
+export const fontesDadosAlimentos = {
+    TACO: {
+        nome: 'Tabela Brasileira de Composição de Alimentos (TACO)',
+        versao: '4ª edição revisada e ampliada, 2011',
+        instituicao: 'NEPA/UNICAMP'
+    },
+    Tucunduva: {
+        nome: 'Tabela de Composição de Alimentos: suporte para decisão nutricional',
+        versao: '2ª edição, 2002',
+        instituicao: 'Sonia Tucunduva Philippi · Editora Gráfica Coronário'
+    }
+} as const;
+
 export interface Micronutrientes {
     retinol_ug: ValorMicronutriente;
     vitamina_a_re_ug: ValorMicronutriente;

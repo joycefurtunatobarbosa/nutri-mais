@@ -1,0 +1,29 @@
+{
+  "titulo": "Dietary Reference Intakes (DRIs): Acceptable Macronutrient Distribution Ranges — página 6",
+  "fonte": "Food and Nutrition Board, Institute of Medicine, National Academies. Fonte: DRIs for Energy, Carbohydrate, Fiber, Fat, Fatty Acids, Cholesterol, Protein, and Amino Acids (2002/2005).",
+  "dados": [
+    {
+      "macronutriente": "Dietary cholesterol",
+      "recomendacao": "As low as possible while consuming a nutritionally adequate diet",
+      "recomendacao_pt": "O mais baixo possível, mantendo uma dieta nutricionalmente adequada"
+    },
+    {
+      "macronutriente": "Trans fatty acids",
+      "recomendacao": "As low as possible while consuming a nutritionally adequate diet",
+      "recomendacao_pt": "O mais baixo possível, mantendo uma dieta nutricionalmente adequada"
+    },
+    {
+      "macronutriente": "Saturated fatty acids",
+      "recomendacao": "As low as possible while consuming a nutritionally adequate diet",
+      "recomendacao_pt": "O mais baixo possível, mantendo uma dieta nutricionalmente adequada"
+    },
+    {
+      "macronutriente": "Added sugars",
+      "recomendacao": "Limit to no more than 25 % of total energy",
+      "recomendacao_pt": "Limitar a no máximo 25% da energia total",
+      "valor_maximo": 25,
+      "unidade": "% da energia total",
+      "nota": "Não é uma ingestão recomendada. Não foi estabelecida uma ingestão diária de açúcares adicionados a ser buscada para alcançar uma dieta saudável."
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { criptografarPlano } from '@/dados/compartilhamentoPlano';
 import { gerarCodigoHashPlano, obterPlanoMock, planosMock, type StatusPlanoMock } from '@/dados/planosMock';
-import { lerPlanosSalvos, type RefeicaoPlano } from '@/dados/planosSalvos';
+import { lerPlanosSalvos, normalizarRefeicaoPlano, type RefeicaoPlano } from '@/dados/planosSalvos';
 import { gerarPdfPlano } from '@/utils/gerarPdfPlano';
 
 interface PlanoAlimentar {
@@ -85,7 +85,7 @@ function itensDoPlano(plano: PlanoAlimentar): RefeicaoPlano[] {
         return plano.itens;
     }
 
-    return obterPlanoMock(plano.id)?.itens ?? [];
+    return obterPlanoMock(plano.id)?.itens.map(normalizarRefeicaoPlano) ?? [];
 }
 
 const planoParaCompartilhar = computed(() => {
@@ -169,7 +169,11 @@ async function gerarLinkCompartilhado() {
                 objetivo: plano.objetivo,
                 nutricionista: plano.nutricionista,
                 calorias: plano.calorias,
-                refeicoes: plano.refeicoes,
+                refeicoes: itens.filter(
+                    (refeicao) =>
+                        refeicao.alimentos.length > 0 ||
+                        refeicao.observacoes?.trim()
+                ).length,
                 atualizadoEm: plano.atualizadoEm,
                 itens
             },

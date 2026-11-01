@@ -1,4 +1,5 @@
-import type { AlimentoNoPlano, RefeicaoPlano } from './planosSalvos';
+import type { AlimentoSubstituto, AlimentoNoPlano, RefeicaoPlano } from './planosSalvos';
+import type { Alimento } from './alimentos';
 
 export interface PlanoPacienteCompartilhado {
     paciente: string;
@@ -60,7 +61,7 @@ function isNumeroOpcional(valor: unknown): valor is number | null {
     return valor === null || (typeof valor === 'number' && Number.isFinite(valor));
 }
 
-function isAlimentoNoPlano(valor: unknown): valor is AlimentoNoPlano {
+function isAlimento(valor: unknown): valor is Alimento {
     if (!isRegistro(valor)) {
         return false;
     }
@@ -74,10 +75,31 @@ function isAlimentoNoPlano(valor: unknown): valor is AlimentoNoPlano {
         isNumeroOpcional(valor.proteina_g) &&
         isNumeroOpcional(valor.lipideos_g) &&
         isNumeroOpcional(valor.carboidrato_g) &&
-        isNumeroOpcional(valor.fibra_g) &&
+        isNumeroOpcional(valor.fibra_g)
+    );
+}
+
+function isAlimentoSubstituto(valor: unknown): valor is AlimentoSubstituto {
+    return (
+        isRegistro(valor) &&
+        isAlimento(valor) &&
         typeof valor.quantidadeGramas === 'number' &&
         Number.isFinite(valor.quantidadeGramas) &&
         valor.quantidadeGramas > 0
+    );
+}
+
+function isAlimentoNoPlano(valor: unknown): valor is AlimentoNoPlano {
+    return (
+        isRegistro(valor) &&
+        isAlimento(valor) &&
+        typeof valor.quantidadeGramas === 'number' &&
+        Number.isFinite(valor.quantidadeGramas) &&
+        valor.quantidadeGramas > 0 &&
+        (valor.substituicoes === undefined ||
+            typeof valor.substituicoes === 'string' ||
+            (Array.isArray(valor.substituicoes) && valor.substituicoes.every(isAlimentoSubstituto))) &&
+        (valor.descricaoSubstituicoes === undefined || typeof valor.descricaoSubstituicoes === 'string')
     );
 }
 
@@ -86,6 +108,8 @@ function isRefeicao(valor: unknown): valor is RefeicaoPlano {
         isRegistro(valor) &&
         typeof valor.nome === 'string' &&
         (valor.horario === undefined || typeof valor.horario === 'string') &&
+        (valor.substituicoes === undefined || typeof valor.substituicoes === 'string') &&
+        (valor.observacoes === undefined || typeof valor.observacoes === 'string') &&
         Array.isArray(valor.alimentos) &&
         valor.alimentos.every(isAlimentoNoPlano)
     );

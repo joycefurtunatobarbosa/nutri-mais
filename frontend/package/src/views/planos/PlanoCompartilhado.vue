@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { descriptografarPlano, type PlanoPacienteCompartilhado } from '@/dados/compartilhamentoPlano';
-import type { AlimentoNoPlano } from '@/dados/planosSalvos';
+import { normalizarRefeicaoPlano, type AlimentoNoPlano } from '@/dados/planosSalvos';
 import { gerarPdfPlano } from '@/utils/gerarPdfPlano';
 
 const token = new URLSearchParams(window.location.hash.slice(1)).get('plano');
@@ -11,6 +11,13 @@ const plano = ref<PlanoPacienteCompartilhado | null>(null);
 const erro = ref('');
 const abrindo = ref(false);
 const gerandoPdf = ref(false);
+const refeicoesVisiveis = computed(
+    () =>
+        plano.value?.itens.filter(
+            (refeicao) =>
+                refeicao.alimentos.length > 0 || refeicao.observacoes?.trim()
+        ) ?? []
+);
 
 const totais = computed(() => {
     if (!plano.value) {
@@ -110,7 +117,11 @@ async function abrirPlano() {
     erro.value = '';
 
     try {
-        plano.value = await descriptografarPlano(token, senha.value);
+        const planoDescriptografado = await descriptografarPlano(token, senha.value);
+        plano.value = {
+            ...planoDescriptografado,
+            itens: planoDescriptografado.itens.map(normalizarRefeicaoPlano)
+        };
         senha.value = '';
     } catch (falha) {
         console.error('Não foi possível abrir o plano compartilhado.', falha);
@@ -193,11 +204,11 @@ async function abrirPlano() {
 
             <div class="cabecalho-refeicoes">
                 <div><h2>Suas refeições</h2><p>Alimentos e porções recomendadas</p></div>
-                <span>{{ plano.refeicoes }} {{ plano.refeicoes === 1 ? 'refeição' : 'refeições' }}</span>
+                <span>{{ refeicoesVisiveis.length }} {{ refeicoesVisiveis.length === 1 ? 'refeição' : 'refeições' }}</span>
             </div>
 
             <v-card
-                v-for="refeicao in plano.itens.filter((item) => item.alimentos.length)"
+                v-for="refeicao in refeicoesVisiveis"
                 :key="refeicao.nome"
                 class="cartao-refeicao"
                 elevation="0"
@@ -206,9 +217,28 @@ async function abrirPlano() {
                     <h3><span v-if="refeicao.horario" class="horario-refeicao">{{ refeicao.horario }}</span>{{ refeicao.nome }}</h3>
                     <span>{{ formatarNutriente(caloriasDaRefeicao(refeicao.alimentos), 'kcal') }}</span>
                 </div>
-                <div v-for="alimento in refeicao.alimentos" :key="alimento.id" class="linha-alimento">
-                    <div><strong>{{ alimento.nome }}</strong></div>
-                    <strong>{{ alimento.quantidadeGramas.toLocaleString('pt-BR') }} g</strong>
+                <div v-for="alimento in refeicao.alimentos" :key="alimento.id" class="alimento-compartilhado">
+                    <div class="linha-alimento">
+                        <div><strong>{{ alimento.nome }}</strong></div>
+                        <strong>{{ alimento.quantidadeGramas.toLocaleString('pt-BR') }} g</strong>
+                    </div>
+                    <div v-if="alimento.descricaoSubstituicoes?.trim()" class="detalhe-refeicao">
+                        <strong>Descrição anterior da substituição</strong>
+                        <p>{{ alimento.descricaoSubstituicoes }}</p>
+                    </div>
+                    <div v-if="alimento.substituicoes?.length" class="detalhe-refeicao substituicoes-estruturadas">
+                        <strong>Alimentos para substituição</strong>
+                        <article v-for="(substituto, indice) in alimento.substituicoes" :key="`${substituto.id}-${indice}`">
+                            <div class="linha-alimento">
+                                <span><strong>{{ substituto.nome }}</strong></span>
+                                <strong>{{ substituto.quantidadeGramas.toLocaleString('pt-BR') }} g</strong>
+                            </div>
+                        </article>
+                    </div>
+                </div>
+                <div v-if="refeicao.observacoes?.trim()" class="detalhe-refeicao">
+                    <strong>Observações</strong>
+                    <p>{{ refeicao.observacoes }}</p>
                 </div>
             </v-card>
 
@@ -250,8 +280,18 @@ async function abrirPlano() {
 .titulo-refeicao h3 .horario-refeicao { display: inline-block; margin-right: 10px; padding: 2px 8px; border-radius: 6px; background: #eef4ff; color: #1e5eff; font-size: 12px; font-weight: 700; }
 .titulo-refeicao span { color: #7b8893; font-size: 12px; }
 .linha-alimento { padding-top: 13px; font-size: 13px; }
+.alimento-compartilhado + .alimento-compartilhado { margin-top: 12px; border-top: 1px solid #edf0f4; }
+.alimento-compartilhado + .alimento-compartilhado .linha-alimento { padding-top: 12px; }
 .linha-alimento div { display: flex; flex-direction: column; gap: 3px; }
 .linha-alimento div span { color: #7b8893; font-size: 11px; }
+.detalhe-refeicao { margin-top: 14px; padding-top: 12px; border-top: 1px solid #edf0f4; }
+.detalhe-refeicao strong { font-size: 12px; }
+.detalhe-refeicao p { margin: 5px 0 0; color: #526170; font-size: 13px; line-height: 1.5; white-space: pre-line; }
+.substituicoes-estruturadas > article { padding: 8px 0; border-top: 1px solid #f0f2f5; }
+.substituicoes-estruturadas .linha-alimento { padding-top: 0; }
+.substituicoes-estruturadas .linha-alimento strong { color: #34495c; font-size: 13px; }
+.nutrientes-item-refeicao { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; }
+.nutrientes-item-refeicao span { color: #7b8893; font-size: 11px; }
 .rodape-plano { margin-top: 22px; color: #7b8893; font-size: 12px; text-align: center; }
 @media (max-width: 650px) {
     .pagina-compartilhada { padding: 22px 14px 40px; }

@@ -1,13 +1,30 @@
 import type { Alimento, FonteAlimento } from './alimentos';
 
+export interface AlimentoSubstituto extends Alimento {
+    quantidadeGramas: number;
+}
+
 export interface AlimentoNoPlano extends Alimento {
     quantidadeGramas: number;
+    substituicoes?: AlimentoSubstituto[];
+    descricaoSubstituicoes?: string;
+}
+
+interface AlimentoNoPlanoLegado extends Omit<AlimentoNoPlano, 'substituicoes'> {
+    substituicoes?: AlimentoSubstituto[] | string;
+    descricaoSubstituicoes?: string;
 }
 
 export interface RefeicaoPlano {
     nome: string;
     horario?: string;
     alimentos: AlimentoNoPlano[];
+    substituicoes?: string;
+    observacoes?: string;
+}
+
+interface RefeicaoPlanoLegada extends Omit<RefeicaoPlano, 'alimentos'> {
+    alimentos: AlimentoNoPlanoLegado[];
 }
 
 export interface PlanoAlimentarSalvo {
@@ -15,6 +32,7 @@ export interface PlanoAlimentarSalvo {
     paciente: string;
     objetivo: string;
     nutricionista: string;
+    ajusteCaloricoEER?: number;
     calorias: number | null;
     refeicoes: number;
     atualizadoEm: string;
@@ -40,8 +58,39 @@ export function lerPlanosSalvos(): PlanoAlimentarSalvo[] {
     // Planos salvos antes da adição do campo "nutricionista" não o possuem no localStorage.
     return (dados as PlanoAlimentarSalvo[]).map((plano) => ({
         ...plano,
-        nutricionista: plano.nutricionista ?? ''
+        nutricionista: plano.nutricionista ?? '',
+        ajusteCaloricoEER: plano.ajusteCaloricoEER ?? 0,
+        itens: plano.itens.map(normalizarRefeicaoPlano)
     }));
+}
+
+export function normalizarRefeicaoPlano(refeicao: RefeicaoPlano | RefeicaoPlanoLegada): RefeicaoPlano {
+    const substituicaoAntiga = refeicao.substituicoes?.trim() ?? '';
+    const dadosRefeicao = { ...refeicao };
+    delete dadosRefeicao.substituicoes;
+
+    return {
+        ...dadosRefeicao,
+        observacoes: refeicao.observacoes ?? '',
+        alimentos: refeicao.alimentos.map((alimento, indice) => {
+            const substituicoes = alimento.substituicoes;
+            const dadosAlimento = { ...alimento };
+            delete dadosAlimento.substituicoes;
+            const descricaoLegada =
+                alimento.descricaoSubstituicoes?.trim() ||
+                (typeof substituicoes === 'string'
+                    ? substituicoes
+                    : indice === 0
+                      ? substituicaoAntiga
+                      : '');
+
+            return {
+                ...dadosAlimento,
+                substituicoes: Array.isArray(substituicoes) ? substituicoes : [],
+                descricaoSubstituicoes: descricaoLegada
+            };
+        })
+    };
 }
 
 export function salvarPlano(plano: PlanoAlimentarSalvo): void {

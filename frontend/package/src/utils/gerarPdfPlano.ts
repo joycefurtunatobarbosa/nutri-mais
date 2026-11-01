@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import type { AlimentoNoPlano, RefeicaoPlano } from '@/dados/planosSalvos';
+import { normalizarRefeicaoPlano, type AlimentoNoPlano, type RefeicaoPlano } from '@/dados/planosSalvos';
 
 export interface DadosPlanoParaPdf {
     paciente: string;
@@ -48,7 +48,8 @@ function nomeDeArquivo(paciente: string): string {
  * padrão visual da página de compartilhamento com o paciente.
  */
 export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
-    const todosAlimentos = dados.itens.reduce<AlimentoNoPlano[]>((todos, refeicao) => {
+    const itens = dados.itens.map(normalizarRefeicaoPlano);
+    const todosAlimentos = itens.reduce<AlimentoNoPlano[]>((todos, refeicao) => {
         todos.push(...refeicao.alimentos);
         return todos;
     }, []);
@@ -66,7 +67,7 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
         gorduras: calcularPercentualMacro(totais.gorduras, 9, totais.calorias)
     };
 
-    const refeicoesComAlimentos = dados.itens.filter((refeicao) => refeicao.alimentos.length);
+    const refeicoesVisiveis = itens.filter((refeicao) => refeicao.alimentos.length > 0 || refeicao.observacoes?.trim());
 
     const documento = new jsPDF({ format: 'a4', unit: 'mm' });
     const larguraPagina = 210;
@@ -95,6 +96,35 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
     const adicionarPagina = () => {
         documento.addPage();
         adicionarCabecalhoPagina();
+    };
+    const adicionarDetalheRefeicao = (rotulo: string, texto: string) => {
+        documento.setFont('helvetica', 'normal');
+        documento.setFontSize(8);
+        const linhas = documento.splitTextToSize(texto.trim(), larguraConteudo - 8) as string[];
+        let inicio = 0;
+
+        while (inicio < linhas.length) {
+            const linhasDisponiveis = Math.floor((rodape - y - 11) / 4.5);
+
+            if (linhasDisponiveis < 1) {
+                adicionarPagina();
+                continue;
+            }
+
+            const segmento = linhas.slice(inicio, inicio + linhasDisponiveis);
+            const alturaCartao = 10 + segmento.length * 4.5;
+            arredondarCartao(margem, y, larguraConteudo, alturaCartao);
+            documento.setFont('helvetica', 'bold');
+            documento.setFontSize(8);
+            definirCorTexto([10, 37, 64]);
+            documento.text(`${rotulo}${inicio > 0 ? ' (continuação)' : ''}`, margem + 4, y + 4.5);
+            documento.setFont('helvetica', 'normal');
+            documento.setFontSize(8);
+            definirCorTexto([82, 97, 112]);
+            documento.text(segmento, margem + 4, y + 9);
+            y += alturaCartao + 4;
+            inicio += segmento.length;
+        }
     };
     const arredondarCartao = (x: number, topo: number, largura: number, altura: number) => {
         documento.setDrawColor(232, 237, 242);
@@ -179,7 +209,7 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
     documento.setFontSize(9);
     definirCorTexto([123, 136, 147]);
     documento.text(
-        `${refeicoesComAlimentos.length} ${refeicoesComAlimentos.length === 1 ? 'refeição' : 'refeições'}`,
+        `${refeicoesVisiveis.length} ${refeicoesVisiveis.length === 1 ? 'refeição' : 'refeições'}`,
         larguraPagina - margem,
         y + 4,
         { align: 'right' }
@@ -188,7 +218,7 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
 
     const maximoLinhasAlimento = Math.min(50, Math.floor((rodape - 27 - 22) / 4.5));
 
-    refeicoesComAlimentos.forEach((refeicao) => {
+    refeicoesVisiveis.forEach((refeicao) => {
         const alimentos: {
             alimento: AlimentoNoPlano;
             nomeLinhas: string[];
@@ -214,6 +244,25 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
         });
 
         let indiceAlimento = 0;
+
+        if (!alimentos.length) {
+            const tituloLinhas = documento.splitTextToSize(
+                [refeicao.horario, refeicao.nome].filter(Boolean).join('  '),
+                larguraConteudo - 42
+            );
+            const alturaCabecalho = Math.max(13, tituloLinhas.length * 4.5 + 8);
+
+            if (y + alturaCabecalho > rodape) {
+                adicionarPagina();
+            }
+
+            arredondarCartao(margem, y, larguraConteudo, alturaCabecalho);
+            documento.setFont('helvetica', 'bold');
+            documento.setFontSize(10);
+            definirCorTexto([10, 37, 64]);
+            documento.text(tituloLinhas, margem + 4, y + 6);
+            y += alturaCabecalho + 5;
+        }
 
         while (indiceAlimento < alimentos.length) {
             const continuacao = indiceAlimento > 0;
@@ -286,6 +335,24 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
             if (indiceAlimento < alimentos.length) {
                 adicionarPagina();
             }
+        }
+
+        refeicao.alimentos.forEach((alimento) => {
+            const substituicoes = [
+                ...(alimento.descricaoSubstituicoes?.trim()
+                    ? [`Descrição anterior: ${alimento.descricaoSubstituicoes.trim()}`]
+                    : []),
+                ...(alimento.substituicoes ?? []).map((substituto) => {
+                    return `${substituto.nome} · ${substituto.quantidadeGramas.toLocaleString('pt-BR')} g`;
+                })
+            ];
+
+            if (substituicoes.length) {
+                adicionarDetalheRefeicao(`Substituições para ${alimento.nome}`, substituicoes.join('\n'));
+            }
+        });
+        if (refeicao.observacoes?.trim()) {
+            adicionarDetalheRefeicao('Observações', refeicao.observacoes);
         }
     });
 

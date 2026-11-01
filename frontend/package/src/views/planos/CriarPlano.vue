@@ -4,17 +4,37 @@ import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import {
     alimentosBase,
+    fontesDadosAlimentos,
     type Alimento,
     type FonteAlimento,
     type Micronutrientes,
     type ValorMicronutriente
 } from '@/dados/alimentos';
-import { calcularIdade, criarPaciente, lerPacientes, type Paciente } from '@/dados/pacientes';
+import {
+    calcularIdade,
+    calcularIdadeEmMeses,
+    criarPaciente,
+    lerPacientes,
+    opcoesGrupoRDA,
+    rotuloGrupoRDA,
+    type GrupoRDA,
+    type Paciente,
+    type SexoPaciente
+} from '@/dados/pacientes';
+import { obterCalculoEER } from '@/dados/eer';
+import {
+    obterGrupoReferenciaRDA,
+    obterReferenciaAMDR,
+    obterReferenciasNutrientes,
+    legendasReferencias,
+    type ReferenciaNutricional
+} from '@/dados/rda';
 import { gerarCodigoHashPlano, obterPlanoMockPorCodigo } from '@/dados/planosMock';
 import {
     atualizarPlano,
     criarAlimentoPersonalizado,
     lerPlanosSalvos,
+    normalizarRefeicaoPlano,
     salvarPlano,
     type AlimentoNoPlano,
     type PlanoAlimentarSalvo,
@@ -29,17 +49,69 @@ const refeicoesPadrao = ['Café da manhã', 'Lanche da manhã', 'Almoço', 'Lanc
 const horariosPadrao = ['07:30', '10:00', '12:30', '16:00', '19:30', '21:30'];
 
 function criarRefeicoesPadrao(): RefeicaoPlano[] {
-    return refeicoesPadrao.map((nome, indice) => ({ nome, horario: horariosPadrao[indice], alimentos: [] }));
+    return refeicoesPadrao.map((nome, indice) => ({
+        nome,
+        horario: horariosPadrao[indice],
+        alimentos: [],
+        observacoes: ''
+    }));
 }
 
 const refeicoes = ref<RefeicaoPlano[]>(criarRefeicoesPadrao());
+const substituicoesAbertas = ref(new Set<string>());
+const alimentosSubstitutosSelecionados = ref<Record<string, Alimento | null>>({});
+const quantidadesSubstitutos = ref<Record<string, number>>({});
 const nomesRefeicoes = computed(() => refeicoes.value.map((refeicao) => refeicao.nome));
 const refeicaoSelecionada = ref(refeicoesPadrao[0]);
 const nomePaciente = ref('');
 const pacientes = ref<Paciente[]>(lerPacientes());
 const dialogoNovoPaciente = ref(false);
-const novoPaciente = ref({ nome: '', dataNascimento: '', email: '', telefone: '' });
+const novoPaciente = ref({
+    nome: '',
+    dataNascimento: '',
+    sexo: null as SexoPaciente | null,
+    grupo: null as GrupoRDA | null,
+    email: '',
+    telefone: ''
+});
+const opcoesSexo: SexoPaciente[] = ['Feminino', 'Masculino', 'Outro', 'Prefiro não informar'];
 const erroNovoPaciente = ref('');
+
+const pacienteSelecionado = computed(
+    () => pacientes.value.find((paciente) => paciente.nome === nomePaciente.value) ?? null
+);
+const objetivoLegadoPlano = ref('');
+const objetivo = computed(() =>
+    pacienteSelecionado.value
+        ? pacienteSelecionado.value.objetivoNutricional ?? ''
+        : objetivoLegadoPlano.value
+);
+const grupoPacienteSelecionado = computed(() => obterGrupoReferenciaRDA(pacienteSelecionado.value));
+const idadePacienteSelecionado = computed(() => {
+    if (!pacienteSelecionado.value) {
+        return null;
+    }
+
+    const idadeEmMeses = calcularIdadeEmMeses(pacienteSelecionado.value.dataNascimento);
+    if (idadeEmMeses === null) {
+        return null;
+    }
+
+    return idadeEmMeses < 24
+        ? `${idadeEmMeses} ${idadeEmMeses === 1 ? 'mês' : 'meses'}`
+        : `${calcularIdade(pacienteSelecionado.value.dataNascimento)} anos`;
+});
+const referenciasNutrientes = computed(() => obterReferenciasNutrientes(pacienteSelecionado.value));
+const calculoEERPaciente = computed(() => pacienteSelecionado.value ? obterCalculoEER(pacienteSelecionado.value) : null);
+const referenciaCarboidrato = computed(() =>
+    obterReferenciaAMDR(pacienteSelecionado.value, 'Carbohydrate')
+);
+const referenciaProteina = computed(() =>
+    obterReferenciaAMDR(pacienteSelecionado.value, 'Protein')
+);
+const referenciaGordura = computed(() =>
+    obterReferenciaAMDR(pacienteSelecionado.value, 'Fat')
+);
 
 // Mantém no seletor o paciente de planos antigos, mesmo que não esteja cadastrado.
 const opcoesPacientes = computed(() => {
@@ -59,17 +131,26 @@ function salvarNovoPaciente() {
     const paciente = criarPaciente({
         nome,
         dataNascimento: novoPaciente.value.dataNascimento,
+        sexo: novoPaciente.value.sexo,
+        grupo: novoPaciente.value.grupo,
+        objetivoNutricional: null,
+        pesoKg: null,
+        alturaCm: null,
+        nivelAtividadeFisica: null,
+        estagioFisiologicoEER: 'Nenhum',
+        semanasGestacao: null,
+        classificacaoPesoGestacional: null,
         email: novoPaciente.value.email.trim(),
         telefone: novoPaciente.value.telefone.trim(),
         observacoes: ''
     });
     pacientes.value = lerPacientes();
     nomePaciente.value = paciente.nome;
-    novoPaciente.value = { nome: '', dataNascimento: '', email: '', telefone: '' };
+    novoPaciente.value = { nome: '', dataNascimento: '', sexo: null, grupo: null, email: '', telefone: '' };
     erroNovoPaciente.value = '';
     dialogoNovoPaciente.value = false;
 }
-const objetivo = ref('');
+const ajusteCaloricoEER = ref(0);
 const nomeNutricionista = ref('');
 const busca = ref('');
 const filtroFonte = ref<FonteAlimento | 'Todas as fontes'>('Todas as fontes');
@@ -79,6 +160,9 @@ const dialogoNovaRefeicao = ref(false);
 const dialogoMicronutrientes = ref(false);
 const alimentoMicronutrientes = ref<Alimento | AlimentoNoPlano | null>(null);
 const modoResumoMicronutrientes = ref(false);
+const legendaReferenciasExpandida = ref(false);
+const legendaDialogoExpandida = ref(false);
+const fontesAlimentosExpandidas = ref(false);
 const nomeNovaRefeicao = ref('');
 const horarioNovaRefeicao = ref('');
 const erroNovaRefeicao = ref('');
@@ -103,7 +187,8 @@ watch(
 
         if (codigo === undefined) {
             nomePaciente.value = '';
-            objetivo.value = '';
+            objetivoLegadoPlano.value = '';
+            ajusteCaloricoEER.value = 0;
             nomeNutricionista.value = '';
             refeicoes.value = criarRefeicoesPadrao();
             refeicaoSelecionada.value = refeicoesPadrao[0];
@@ -124,13 +209,11 @@ watch(
             }
 
             nomePaciente.value = plano.paciente;
-            objetivo.value = plano.objetivo;
+            objetivoLegadoPlano.value = plano.objetivo;
+            ajusteCaloricoEER.value = 0;
             nomeNutricionista.value = plano.nutricionista ?? '';
             statusPlanoCarregado.value = plano.status;
-            refeicoes.value = plano.itens.map((refeicao) => ({
-                ...refeicao,
-                alimentos: refeicao.alimentos.map((alimento) => ({ ...alimento }))
-            }));
+            refeicoes.value = plano.itens.map(normalizarRefeicaoPlano);
             refeicaoSelecionada.value = refeicoes.value[0]?.nome ?? refeicoesPadrao[0];
             planoMockCarregado.value = true;
             return;
@@ -152,13 +235,11 @@ watch(
             }
 
             nomePaciente.value = plano.paciente;
-            objetivo.value = plano.objetivo;
+            objetivoLegadoPlano.value = plano.objetivo;
+            ajusteCaloricoEER.value = plano.ajusteCaloricoEER ?? 0;
             nomeNutricionista.value = plano.nutricionista ?? '';
             statusPlanoCarregado.value = plano.status;
-            refeicoes.value = plano.itens.map((refeicao) => ({
-                ...refeicao,
-                alimentos: refeicao.alimentos.map((alimento) => ({ ...alimento }))
-            }));
+            refeicoes.value = plano.itens.map(normalizarRefeicaoPlano);
             refeicaoSelecionada.value = refeicoes.value[0]?.nome ?? refeicoesPadrao[0];
             planoSalvoId.value = plano.id;
         } catch (falha) {
@@ -192,7 +273,7 @@ const alimentosCorrespondentes = computed(() => {
     });
 });
 
-const alimentosEncontrados = computed(() => alimentosCorrespondentes.value.slice(0, 20));
+const alimentosEncontrados = computed(() => alimentosCorrespondentes.value);
 const todasAsPorcoes = computed(() =>
     refeicoes.value.reduce<AlimentoNoPlano[]>((porcoes, refeicao) => {
         porcoes.push(...refeicao.alimentos);
@@ -217,6 +298,14 @@ const resumo = computed(() => ({
     carboidrato: calcularNutriente(todasAsPorcoes.value, 'carboidrato_g'),
     gordura: calcularNutriente(todasAsPorcoes.value, 'lipideos_g')
 }));
+const objetivoCaloricoEER = computed(() => {
+    if (!calculoEERPaciente.value || !Number.isFinite(ajusteCaloricoEER.value)) {
+        return null;
+    }
+
+    const objetivoKcal = Math.round(calculoEERPaciente.value.kcal + ajusteCaloricoEER.value);
+    return objetivoKcal > 0 ? objetivoKcal : null;
+});
 
 const participacaoEnergetica = computed(() => {
     const caloriasPlano = resumo.value.calorias;
@@ -289,8 +378,24 @@ const opcoesGraficoMacronutrientes = computed(() => ({
         yaxis: { lines: { show: false } }
     },
     tooltip: {
-        y: {
-            formatter: (valor: number) => `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da dieta`
+        custom: ({
+            series,
+            seriesIndex,
+            dataPointIndex
+        }: {
+            series: number[][];
+            seriesIndex: number;
+            dataPointIndex: number;
+        }) => {
+            const nome = categoriasGraficoMacronutrientes.value[dataPointIndex];
+            const valor = series[seriesIndex]?.[dataPointIndex];
+            if (!nome || valor === undefined) {
+                return '';
+            }
+
+            const cor = coresMacronutrientes[nome];
+            const percentual = `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+            return `<div style="padding:8px 12px;border-radius:5px;background:${cor};color:#fff;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.18)">${nome}: ${percentual} da energia total</div>`;
         }
     }
 }));
@@ -305,7 +410,6 @@ const serieGraficoMacronutrientes = computed(() => [
 ]);
 
 const tipoGraficoMacronutrientes = ref<'bar' | 'pie'>('bar');
-const graficoEnergeticoExpandido = ref(false);
 const opcoesGraficoPizza = computed(() => ({
     chart: { type: 'pie', fontFamily: 'inherit', foreColor: '#7b8893' },
     labels: categoriasGraficoMacronutrientes.value,
@@ -387,6 +491,7 @@ const resumoMicronutrientes = computed(() =>
             return {
                 ...campo,
                 valor,
+                referencia: referenciasNutrientes.value?.[campo.chave] ?? null,
                 informados,
                 totalAlimentos: todasAsPorcoes.value.length
             };
@@ -406,6 +511,19 @@ function formatarMicronutriente(valor: ValorMicronutriente, unidade: string): st
     return valor === 'Tr'
         ? 'Sem valor'
         : `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unidade}`;
+}
+
+function formatarReferencia(referencia: ReferenciaNutricional): string {
+    if (referencia.tipo === 'AMDR') {
+        const minimo = referencia.minimo?.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+        const maximo = referencia.maximo?.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+        return `AMDR: ${minimo}–${maximo} ${referencia.unidade}`;
+    }
+
+    const valor = referencia.valor?.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+    const marcador = referencia.tipo === 'AI' ? '*' : '';
+    const complemento = referencia.tipo === 'UL' ? ' (limite máximo)' : '';
+    return `${referencia.tipo}${marcador}${complemento}: ${valor} ${referencia.unidade}`;
 }
 
 function abrirMicronutrientes(alimento: Alimento | AlimentoNoPlano) {
@@ -447,6 +565,58 @@ function adicionarAlimento(alimento: Alimento) {
 
 function removerAlimento(refeicao: RefeicaoPlano, alimentoId: string) {
     refeicao.alimentos = refeicao.alimentos.filter((alimento) => alimento.id !== alimentoId);
+    const chave = chaveSubstituicao(refeicao, alimentoId);
+    delete alimentosSubstitutosSelecionados.value[chave];
+    delete quantidadesSubstitutos.value[chave];
+    if (substituicoesAbertas.value.has(chave)) {
+        const abertas = new Set(substituicoesAbertas.value);
+        abertas.delete(chave);
+        substituicoesAbertas.value = abertas;
+    }
+}
+
+function chaveSubstituicao(refeicao: RefeicaoPlano, alimentoId: string): string {
+    return `${refeicao.nome}:${alimentoId}`;
+}
+
+function alternarSubstituicao(refeicao: RefeicaoPlano, alimento: AlimentoNoPlano) {
+    const abertas = new Set(substituicoesAbertas.value);
+    const chave = chaveSubstituicao(refeicao, alimento.id);
+
+    if (abertas.has(chave)) {
+        abertas.delete(chave);
+    } else {
+        abertas.add(chave);
+        quantidadesSubstitutos.value[chave] ??= 100;
+    }
+
+    substituicoesAbertas.value = abertas;
+}
+
+function adicionarSubstituto(refeicao: RefeicaoPlano, alimento: AlimentoNoPlano) {
+    const chave = chaveSubstituicao(refeicao, alimento.id);
+    const alimentoSelecionado = alimentosSubstitutosSelecionados.value[chave];
+    const quantidadeGramas = Number(quantidadesSubstitutos.value[chave] ?? 100);
+
+    if (!alimentoSelecionado) {
+        erro.value = 'Selecione um alimento para substituição.';
+        return;
+    }
+
+    if (!Number.isFinite(quantidadeGramas) || quantidadeGramas <= 0) {
+        erro.value = 'Informe uma porção de substituição maior que zero.';
+        return;
+    }
+
+    alimento.substituicoes ??= [];
+    alimento.substituicoes.push({ ...alimentoSelecionado, quantidadeGramas });
+    alimentosSubstitutosSelecionados.value[chave] = null;
+    quantidadesSubstitutos.value[chave] = 100;
+    erro.value = '';
+}
+
+function removerSubstituto(alimento: AlimentoNoPlano, indice: number) {
+    alimento.substituicoes?.splice(indice, 1);
 }
 
 function atualizarQuantidade(alimento: AlimentoNoPlano, valor: string | number | null) {
@@ -488,7 +658,12 @@ function adicionarRefeicaoPersonalizada() {
         return;
     }
 
-    refeicoes.value.push({ nome, horario: horarioNovaRefeicao.value || undefined, alimentos: [] });
+    refeicoes.value.push({
+        nome,
+        horario: horarioNovaRefeicao.value || undefined,
+        alimentos: [],
+        observacoes: ''
+    });
     refeicaoSelecionada.value = nome;
     dialogoNovaRefeicao.value = false;
     erroNovaRefeicao.value = '';
@@ -539,6 +714,16 @@ function salvarRascunho() {
         return;
     }
 
+    if (!Number.isFinite(ajusteCaloricoEER.value)) {
+        erro.value = 'Informe um ajuste de calorias válido.';
+        return;
+    }
+
+    if (calculoEERPaciente.value && objetivoCaloricoEER.value === null) {
+        erro.value = 'O objetivo de calorias deve ser maior que zero. Ajuste o valor informado.';
+        return;
+    }
+
     salvando.value = true;
     erro.value = '';
 
@@ -548,8 +733,12 @@ function salvarRascunho() {
             paciente: nomePaciente.value.trim(),
             objetivo: objetivo.value.trim(),
             nutricionista: nomeNutricionista.value.trim(),
+            ajusteCaloricoEER: Math.round(ajusteCaloricoEER.value),
             calorias: resumo.value.calorias === null ? null : Math.round(resumo.value.calorias),
-            refeicoes: refeicoes.value.filter((refeicao) => refeicao.alimentos.length > 0).length,
+            refeicoes: refeicoes.value.filter(
+                (refeicao) =>
+                    refeicao.alimentos.length > 0 || refeicao.observacoes?.trim()
+            ).length,
             atualizadoEm: 'Hoje',
             status: planoSalvoId.value === null && !planoMockCarregado.value ? 'Rascunho' : statusPlanoCarregado.value,
             itens: refeicoes.value
@@ -557,11 +746,12 @@ function salvarRascunho() {
 
         if (planoSalvoId.value === null) {
             salvarPlano(plano);
+            planoSalvoId.value = plano.id;
         } else {
             atualizarPlano(plano);
         }
 
-        void router.push('/planos-alimentares');
+        statusPlanoCarregado.value = plano.status;
     } catch (falha) {
         console.error('Não foi possível salvar o plano alimentar.', falha);
         erro.value = 'Não foi possível salvar o plano neste navegador. Tente novamente.';
@@ -632,83 +822,49 @@ function gerarPdf() {
         </v-alert>
 
         <section class="cartoes-nutricao" aria-label="Resumo nutricional">
+            <v-card class="cartao-nutricao objetivo-energetico" elevation="0">
+                <span><b>Objetivo diário</b></span>
+                <strong>{{ formatarNutriente(objetivoCaloricoEER, 'kcal') }}</strong>
+                <small v-if="calculoEERPaciente">
+                    EER {{ calculoEERPaciente.kcal.toLocaleString('pt-BR') }}
+                    {{ ajusteCaloricoEER >= 0 ? '+' : '−' }}
+                    {{ Math.abs(ajusteCaloricoEER).toLocaleString('pt-BR') }} kcal
+                </small>
+                <small v-else>EER indisponível</small>
+            </v-card>
             <v-card class="cartao-nutricao energia" elevation="0">
-                <span>Calorias</span><strong>{{ formatarNutriente(resumo.calorias, 'kcal') }}</strong>
-                <small>no plano</small>
-            </v-card>
-            <v-card class="cartao-nutricao carboidrato" elevation="0">
-                <span>Carboidratos</span><strong>{{ formatarNutriente(resumo.carboidrato, 'g') }}</strong>
-                <small>{{ formatarPercentual(participacaoEnergetica[0].percentual) }} da dieta</small>
-            </v-card>
-            <v-card class="cartao-nutricao proteina" elevation="0">
-                <span>Proteínas</span><strong>{{ formatarNutriente(resumo.proteina, 'g') }}</strong>
-                <small>{{ formatarPercentual(participacaoEnergetica[1].percentual) }} da dieta</small>
-            </v-card>
-            <v-card class="cartao-nutricao gordura" elevation="0">
-                <span>Gorduras</span><strong>{{ formatarNutriente(resumo.gordura, 'g') }}</strong>
-                <small>{{ formatarPercentual(participacaoEnergetica[2].percentual) }} da dieta</small>
+                <span><b>Calorias no plano</b></span><strong>{{ formatarNutriente(resumo.calorias, 'kcal') }}</strong>
             </v-card>
             <v-card class="cartao-nutricao micros-resumo" elevation="0">
-                <span>Micronutrientes</span>
+                <span><b>Micronutrientes</b></span>
                 <v-btn variant="tonal" color="primary" size="small" class="texto-botao" @click="abrirResumoMicronutrientes">
                     <Icon icon="solar:chart-2-linear" width="17" class="me-1" />
                     Ver total da dieta
                 </v-btn>
             </v-card>
+            <v-card class="cartao-nutricao carboidrato" elevation="0">
+                <span><b>Carboidratos</b></span><strong>{{ formatarNutriente(resumo.carboidrato, 'g') }}</strong>
+                <small><b>{{ formatarPercentual(participacaoEnergetica[0].percentual) }} da dieta</b></small>
+                <small v-if="referenciaCarboidrato">{{ formatarReferencia(referenciaCarboidrato) }}</small>
+            </v-card>
+            <v-card class="cartao-nutricao proteina" elevation="0">
+                <span><b>Proteínas</b></span><strong>{{ formatarNutriente(resumo.proteina, 'g') }}</strong>
+                <small><b>{{ formatarPercentual(participacaoEnergetica[1].percentual) }} da dieta</b></small>
+                <small v-if="referenciaProteina">{{ formatarReferencia(referenciaProteina) }}</small>
+            </v-card>
+            <v-card class="cartao-nutricao gordura" elevation="0">
+                <span><b>Gorduras</b></span><strong>{{ formatarNutriente(resumo.gordura, 'g') }}</strong>
+                <small><b>{{ formatarPercentual(participacaoEnergetica[2].percentual) }} da dieta</b></small>
+                <small v-if="referenciaGordura">{{ formatarReferencia(referenciaGordura) }}</small>
+            </v-card>
         </section>
-        <v-card class="cartao-grafico-macros" elevation="0">
-            <div class="titulo-grafico">
-                <button
-                    type="button"
-                    class="botao-toggle-grafico"
-                    :aria-expanded="graficoEnergeticoExpandido"
-                    aria-controls="conteudo-distribuicao-energetica"
-                    @click="graficoEnergeticoExpandido = !graficoEnergeticoExpandido"
-                >
-                    <Icon
-                        :icon="graficoEnergeticoExpandido ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'"
-                        width="20"
-                    />
-                    <span class="texto-toggle-grafico">
-                        <strong>Distribuição energética</strong>
-                        <span>Percentual das calorias totais fornecido por cada macronutriente</span>
-                    </span>
-                </button>
-                <v-btn-toggle v-model="tipoGraficoMacronutrientes" mandatory density="compact" variant="outlined" color="primary" divided>
-                    <v-btn value="bar" class="texto-botao" size="small">Barras</v-btn>
-                    <v-btn value="pie" class="texto-botao" size="small">Pizza</v-btn>
-                </v-btn-toggle>
-            </div>
-            <div v-if="graficoEnergeticoExpandido" id="conteudo-distribuicao-energetica">
-                <p class="legenda-calorica">Carboidratos e proteínas: 4 kcal/g · Gorduras: 9 kcal/g</p>
-                <template v-if="resumo.calorias !== null && resumo.calorias > 0 && participacaoEnergetica.some((macro) => macro.percentual !== null)">
-                    <apexchart
-                        v-if="tipoGraficoMacronutrientes === 'bar'"
-                        key="grafico-barras"
-                        type="bar"
-                        height="190"
-                        :options="opcoesGraficoMacronutrientes"
-                        :series="serieGraficoMacronutrientes"
-                    />
-                    <apexchart
-                        v-else
-                        key="grafico-pizza"
-                        type="pie"
-                        height="240"
-                        :options="opcoesGraficoPizza"
-                        :series="serieGraficoPizza"
-                    />
-                </template>
-                <p v-else class="texto-sem-grafico">Adicione alimentos com calorias e macronutrientes informados para visualizar a distribuição.</p>
-            </div>
-        </v-card>
         <p v-if="todasAsPorcoes.some((alimento) => alimento.kcal === null || alimento.proteina_g === null || alimento.carboidrato_g === null || alimento.lipideos_g === null)" class="aviso-dados">
             Alguns alimentos não têm todos os nutrientes informados na fonte; o total correspondente será exibido como “—”.
         </p>
 
         <v-row class="mt-1">
             <v-col cols="12" lg="6">
-                <v-card class="cartao-conteudo" elevation="0">
+                <v-card class="cartao-conteudo cartao-dados-plano" elevation="0">
                     <div class="titulo-secao">
                         <div class="icone-secao"><Icon icon="solar:user-id-linear" width="21" /></div>
                         <div><h2>Dados do plano</h2><p>Identifique o paciente, o objetivo e o responsável</p></div>
@@ -727,11 +883,165 @@ function gerarPdf() {
                             Novo
                         </v-btn>
                     </div>
-                    <v-text-field v-model="objetivo" label="Objetivo nutricional" placeholder="Ex.: Reeducação alimentar" variant="outlined" />
+                    <div v-if="pacienteSelecionado" class="dados-paciente-referencia">
+                        <span><strong>Grupo:</strong> {{ rotuloGrupoRDA(grupoPacienteSelecionado) }}</span>
+                        <span><strong>Idade:</strong> {{ idadePacienteSelecionado ?? 'Não informada' }}</span>
+                    </div>
+                    <v-alert v-if="calculoEERPaciente" type="info" variant="tonal" class="mb-5 alerta-eer">
+                        <div class="valor-eer-plano">
+                            <span class="rotulo-eer">EER estimado</span>
+                            <strong>{{ calculoEERPaciente.kcal.toLocaleString('pt-BR') }} <small>kcal/dia</small></strong>
+                        </div>
+                        <label class="rotulo-ajuste-eer" for="ajuste-calorico-eer">Ajuste diário (opcional)</label>
+                        <v-text-field
+                            id="ajuste-calorico-eer"
+                            v-model.number="ajusteCaloricoEER"
+                            suffix="kcal/dia"
+                            type="number"
+                            step="50"
+                            variant="outlined"
+                            density="compact"
+                            hide-details
+                            aria-describedby="ajuda-ajuste-eer"
+                        />
+                        <p id="ajuda-ajuste-eer" class="ajuda-ajuste-eer">
+                            Informe um valor positivo para adicionar ou negativo para reduzir calorias.
+                        </p>
+                        <v-alert v-if="objetivoCaloricoEER === null" type="warning" variant="tonal" density="compact" class="mb-2">
+                            O objetivo de calorias precisa ser maior que zero.
+                        </v-alert>
+                    </v-alert>
+                    <v-alert v-else-if="pacienteSelecionado" type="warning" variant="tonal" class="mb-5">
+                        EER indisponível: complete os dados necessários no cadastro do paciente para a equação correspondente à idade e à fase fisiológica.
+                    </v-alert>
+                    <v-text-field
+                        :model-value="objetivo"
+                        label="Objetivo nutricional"
+                        :placeholder="pacienteSelecionado ? 'Defina o objetivo no cadastro do paciente' : 'Selecione um paciente'"
+                        readonly
+                        variant="outlined"
+                        class="campo-objetivo-nutricional"
+                    />
+                    <v-alert
+                        v-if="pacienteSelecionado && !objetivo"
+                        type="warning"
+                        variant="tonal"
+                        density="compact"
+                        class="mb-4"
+                    >
+                        Cadastre o objetivo nutricional deste paciente em
+                        <RouterLink to="/pacientes">Pacientes</RouterLink>
+                        para utilizá-lo no plano.
+                    </v-alert>
                     <v-text-field v-model="nomeNutricionista" label="Nutricionista responsável" placeholder="Nome completo" variant="outlined" />
+                </v-card>
+            </v-col>
+            <v-col cols="12" lg="6" class="coluna-distribuicao">
+                <v-card class="cartao-grafico-macros" elevation="0">
+                    <div class="titulo-grafico">
+                        <div class="texto-toggle-grafico">
+                            <strong>Distribuição energética</strong>
+                            <span>Percentual das calorias totais fornecido por cada macronutriente</span>
+                        </div>
+                        <v-btn-toggle v-model="tipoGraficoMacronutrientes" mandatory density="compact" variant="outlined" color="primary" divided>
+                            <v-btn value="bar" class="texto-botao" size="small">Barras</v-btn>
+                            <v-btn value="pie" class="texto-botao" size="small">Pizza</v-btn>
+                        </v-btn-toggle>
+                    </div>
+                    <div id="conteudo-distribuicao-energetica">
+                        <p class="legenda-calorica">Carboidratos e proteínas: 4 kcal/g · Gorduras: 9 kcal/g</p>
+                        <template v-if="resumo.calorias !== null && resumo.calorias > 0 && participacaoEnergetica.some((macro) => macro.percentual !== null)">
+                            <apexchart
+                                v-if="tipoGraficoMacronutrientes === 'bar'"
+                                key="grafico-barras"
+                                type="bar"
+                                height="240"
+                                :options="opcoesGraficoMacronutrientes"
+                                :series="serieGraficoMacronutrientes"
+                            />
+                            <apexchart
+                                v-else
+                                key="grafico-pizza"
+                                type="pie"
+                                height="240"
+                                :options="opcoesGraficoPizza"
+                                :series="serieGraficoPizza"
+                            />
+                        </template>
+                        <p v-else class="texto-sem-grafico">Adicione alimentos com calorias e macronutrientes informados para visualizar a distribuição.</p>
+                    </div>
+                </v-card>
+                <v-card class="cartao-grafico-macros" elevation="0">
+                    <div class="titulo-grafico">
+                        <button
+                            type="button"
+                            class="botao-toggle-grafico"
+                            :aria-expanded="legendaReferenciasExpandida"
+                            aria-controls="conteudo-legenda-referencias"
+                            @click="legendaReferenciasExpandida = !legendaReferenciasExpandida"
+                        >
+                            <Icon
+                                :icon="legendaReferenciasExpandida ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'"
+                                width="20"
+                            />
+                            <span class="texto-toggle-grafico">
+                                <strong>Significado das siglas de referência</strong>
+                                <span>Definições das referências usadas nos valores nutricionais</span>
+                            </span>
+                        </button>
+                    </div>
+                    <div v-if="legendaReferenciasExpandida" id="conteudo-legenda-referencias" class="legenda-referencias">
+                        <dl>
+                            <div v-for="(referencia, sigla) in legendasReferencias" :key="sigla">
+                                <dt>{{ sigla }}{{ sigla === 'AI' ? '*' : '' }}</dt>
+                                <dd>
+                                    {{ referencia.descricao }}
+                                    <small class="fonte-referencia">
+                                        {{ referencia.fonte }}
+                                        <a :href="referencia.url" target="_blank" rel="noopener noreferrer">Acessar documento</a>
+                                    </small>
+                                </dd>
+                            </div>
+                        </dl>
+                    </div>
+                </v-card>
+                <v-card class="cartao-grafico-macros" elevation="0">
+                    <div class="titulo-grafico">
+                        <button
+                            type="button"
+                            class="botao-toggle-grafico"
+                            :aria-expanded="fontesAlimentosExpandidas"
+                            aria-controls="conteudo-fontes-alimentos"
+                            @click="fontesAlimentosExpandidas = !fontesAlimentosExpandidas"
+                        >
+                            <Icon
+                                :icon="fontesAlimentosExpandidas ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'"
+                                width="20"
+                            />
+                            <span class="texto-toggle-grafico">
+                                <strong>Fontes dos dados dos alimentos</strong>
+                                <span>Tabelas de composição usadas no plano alimentar</span>
+                            </span>
+                        </button>
+                    </div>
+                    <div v-if="fontesAlimentosExpandidas" id="conteudo-fontes-alimentos" class="legenda-referencias">
+                        <dl>
+                            <div v-for="(fonte, nome) in fontesDadosAlimentos" :key="nome">
+                                <dt>{{ nome }}</dt>
+                                <dd>
+                                    {{ fonte.nome }}
+                                    <small class="fonte-referencia">{{ fonte.versao }} · {{ fonte.instituicao }}</small>
+                                </dd>
+                            </div>
+                        </dl>
+                    </div>
+                </v-card>
+            </v-col>
+        </v-row>
 
-                    <v-divider class="my-4" />
-
+        <v-row class="mt-1 linha-edicao-plano">
+            <v-col cols="12" lg="6">
+                <v-card class="cartao-conteudo cartao-alimentos" elevation="0">
                     <div class="titulo-secao titulo-busca">
                         <div class="icone-secao verde"><Icon icon="solar:magnifer-linear" width="21" /></div>
                         <div><h2>Adicionar alimentos</h2><p>Busque nas tabelas ou crie um alimento</p></div>
@@ -753,7 +1063,7 @@ function gerarPdf() {
                     </div>
                     <v-select v-model="refeicaoSelecionada" :items="nomesRefeicoes" label="Adicionar à refeição" variant="outlined" class="mt-4" />
 
-                    <v-btn variant="tonal" color="primary" block class="mb-4 texto-botao" @click="abrirAlimentoPersonalizado">
+                    <v-btn variant="tonal" color="primary" block class="mb-4 texto-botao botao-criar-alimento" @click="abrirAlimentoPersonalizado">
                         <Icon icon="solar:add-circle-linear" width="18" class="me-2" />
                         Criar alimento personalizado
                     </v-btn>
@@ -766,7 +1076,8 @@ function gerarPdf() {
                                 : `${alimentosEncontrados.length} de ${alimentosCorrespondentes.length} resultados` }}
                         </span>
                     </div>
-                    <div v-if="alimentosEncontrados.length" class="lista-alimentos">
+                    <div v-if="alimentosEncontrados.length" class="area-lista-alimentos">
+                    <div class="lista-alimentos">
                         <article v-for="alimento in alimentosEncontrados" :key="alimento.id" class="item-alimento">
                             <div class="alimento-cabecalho">
                                 <div class="alimento-nome">
@@ -796,12 +1107,13 @@ function gerarPdf() {
                             </div>
                         </article>
                     </div>
+                    </div>
                     <div v-else class="sem-resultados">
                         <Icon icon="solar:magnifer-linear" width="25" />
                         <strong>Nenhum alimento encontrado</strong>
                         <span>Confira a busca ou selecione outra fonte.</span>
                     </div>
-                    <p class="nota-fontes">Fontes: Tabela TACO e Tabela de Composição Química dos Alimentos de Tucunduva. Valores por 100 g.</p>
+                    <p class="nota-fontes">Valores nutricionais dos alimentos expressos por 100 g.</p>
                 </v-card>
             </v-col>
 
@@ -837,37 +1149,128 @@ function gerarPdf() {
                             </v-btn>
                         </div>
                         <div v-if="refeicao.alimentos.length" class="itens-refeicao">
-                            <div v-for="alimento in refeicao.alimentos" :key="alimento.id" class="linha-refeicao">
-                                <div class="detalhe-refeicao">
-                                    <strong>{{ alimento.nome }}</strong>
-                                    <v-chip size="x-small" variant="tonal" :color="alimento.fonte === 'TACO' ? 'primary' : alimento.fonte === 'Tucunduva' ? 'success' : 'warning'">
-                                        {{ alimento.fonte }}
-                                    </v-chip>
-                                    <div class="nutrientes-item-refeicao">
-                                        <span>{{ formatarNutriente(alimento.kcal === null ? null : alimento.kcal * alimento.quantidadeGramas / 100, 'kcal') }}</span>
-                                        <span>{{ formatarNutriente(alimento.carboidrato_g === null ? null : alimento.carboidrato_g * alimento.quantidadeGramas / 100, 'g') }} carb.</span>
-                                        <span>{{ formatarNutriente(alimento.proteina_g === null ? null : alimento.proteina_g * alimento.quantidadeGramas / 100, 'g') }} prot.</span>
-                                        <span>{{ formatarNutriente(alimento.lipideos_g === null ? null : alimento.lipideos_g * alimento.quantidadeGramas / 100, 'g') }} gord.</span>
+                            <div v-for="alimento in refeicao.alimentos" :key="alimento.id" class="item-refeicao-container">
+                                <div class="linha-refeicao">
+                                    <div class="detalhe-refeicao">
+                                        <strong>{{ alimento.nome }}</strong>
+                                        <v-chip size="x-small" variant="tonal" :color="alimento.fonte === 'TACO' ? 'primary' : alimento.fonte === 'Tucunduva' ? 'success' : 'warning'">
+                                            {{ alimento.fonte }}
+                                        </v-chip>
+                                        <div class="nutrientes-item-refeicao">
+                                            <span>{{ formatarNutriente(alimento.kcal === null ? null : alimento.kcal * alimento.quantidadeGramas / 100, 'kcal') }}</span>
+                                            <span>{{ formatarNutriente(alimento.carboidrato_g === null ? null : alimento.carboidrato_g * alimento.quantidadeGramas / 100, 'g') }} carb.</span>
+                                            <span>{{ formatarNutriente(alimento.proteina_g === null ? null : alimento.proteina_g * alimento.quantidadeGramas / 100, 'g') }} prot.</span>
+                                            <span>{{ formatarNutriente(alimento.lipideos_g === null ? null : alimento.lipideos_g * alimento.quantidadeGramas / 100, 'g') }} gord.</span>
+                                        </div>
+                                        <v-btn size="small" variant="text" color="primary" class="texto-botao botao-micro-item" @click="abrirMicronutrientes(alimento)">
+                                            <Icon icon="solar:eye-linear" width="16" class="me-1" /> Ver micronutrientes
+                                        </v-btn>
+                                        <v-btn
+                                            size="small"
+                                            variant="text"
+                                            color="primary"
+                                            class="texto-botao botao-micro-item"
+                                            @click="alternarSubstituicao(refeicao, alimento)"
+                                        >
+                                            <Icon icon="solar:alt-arrow-down-linear" width="16" class="me-1" />
+                                            {{ substituicoesAbertas.has(chaveSubstituicao(refeicao, alimento.id))
+                                                ? 'Ocultar substituição'
+                                                : alimento.substituicoes?.length || alimento.descricaoSubstituicoes?.trim()
+                                                    ? 'Editar substituição'
+                                                    : 'Adicionar substituição' }}
+                                        </v-btn>
                                     </div>
-                                    <v-btn size="small" variant="text" color="primary" class="texto-botao botao-micro-item" @click="abrirMicronutrientes(alimento)">
-                                        <Icon icon="solar:eye-linear" width="16" class="me-1" /> Ver micronutrientes
+                                    <v-text-field
+                                        :model-value="alimento.quantidadeGramas"
+                                        aria-label="Quantidade em gramas"
+                                        type="number"
+                                        min="1"
+                                        suffix="g"
+                                        density="compact"
+                                        variant="outlined"
+                                        hide-details
+                                        class="campo-gramas"
+                                        @update:model-value="atualizarQuantidade(alimento, $event)"
+                                    />
+                                    <v-btn icon variant="text" color="error" size="small" :aria-label="`Remover ${alimento.nome}`" @click="removerAlimento(refeicao, alimento.id)">
+                                        <Icon icon="solar:trash-bin-minimalistic-linear" width="18" />
                                     </v-btn>
                                 </div>
-                                <v-text-field
-                                    :model-value="alimento.quantidadeGramas"
-                                    aria-label="Quantidade em gramas"
-                                    type="number"
-                                    min="1"
-                                    suffix="g"
-                                    density="compact"
-                                    variant="outlined"
-                                    hide-details
-                                    class="campo-gramas"
-                                    @update:model-value="atualizarQuantidade(alimento, $event)"
-                                />
-                                <v-btn icon variant="text" color="error" size="small" :aria-label="`Remover ${alimento.nome}`" @click="removerAlimento(refeicao, alimento.id)">
-                                    <Icon icon="solar:trash-bin-minimalistic-linear" width="18" />
-                                </v-btn>
+                                <div
+                                    v-if="substituicoesAbertas.has(chaveSubstituicao(refeicao, alimento.id))"
+                                    class="campo-substituicao-alimento"
+                                >
+                                    <div v-if="alimento.descricaoSubstituicoes?.trim()" class="descricao-substituicao-legada">
+                                        <strong>Descrição anterior</strong>
+                                        <p>{{ alimento.descricaoSubstituicoes }}</p>
+                                    </div>
+                                    <article
+                                        v-for="(substituto, indice) in alimento.substituicoes"
+                                        :key="`${substituto.id}-${indice}`"
+                                        class="substituto-selecionado"
+                                    >
+                                        <div class="cabecalho-substituto">
+                                            <strong>{{ substituto.nome }} · {{ substituto.quantidadeGramas.toLocaleString('pt-BR') }} g</strong>
+                                            <v-btn
+                                                icon
+                                                variant="text"
+                                                color="error"
+                                                size="x-small"
+                                                :aria-label="`Remover substituto ${substituto.nome}`"
+                                                @click="removerSubstituto(alimento, indice)"
+                                            >
+                                                <Icon icon="solar:trash-bin-minimalistic-linear" width="16" />
+                                            </v-btn>
+                                        </div>
+                                        <div class="nutrientes-item-refeicao">
+                                            <span>{{ formatarNutriente(substituto.kcal === null ? null : substituto.kcal * substituto.quantidadeGramas / 100, 'kcal') }}</span>
+                                            <span>{{ formatarNutriente(substituto.carboidrato_g === null ? null : substituto.carboidrato_g * substituto.quantidadeGramas / 100, 'g') }} carb.</span>
+                                            <span>{{ formatarNutriente(substituto.proteina_g === null ? null : substituto.proteina_g * substituto.quantidadeGramas / 100, 'g') }} prot.</span>
+                                            <span>{{ formatarNutriente(substituto.lipideos_g === null ? null : substituto.lipideos_g * substituto.quantidadeGramas / 100, 'g') }} gord.</span>
+                                            <span>{{ formatarNutriente(substituto.fibra_g === null ? null : substituto.fibra_g * substituto.quantidadeGramas / 100, 'g') }} fibras</span>
+                                        </div>
+                                        <v-btn
+                                            size="small"
+                                            variant="text"
+                                            color="primary"
+                                            class="texto-botao botao-micro-item"
+                                            @click="abrirMicronutrientes(substituto)"
+                                        >
+                                            <Icon icon="solar:eye-linear" width="16" class="me-1" /> Ver micronutrientes
+                                        </v-btn>
+                                    </article>
+                                    <div class="campos-novo-substituto">
+                                        <v-autocomplete
+                                            v-model="alimentosSubstitutosSelecionados[chaveSubstituicao(refeicao, alimento.id)]"
+                                            :items="alimentosBase"
+                                            item-title="nome"
+                                            return-object
+                                            label="Buscar alimento substituto"
+                                            placeholder="Digite o nome do alimento"
+                                            variant="outlined"
+                                            density="compact"
+                                            hide-details
+                                        />
+                                        <v-text-field
+                                            v-model.number="quantidadesSubstitutos[chaveSubstituicao(refeicao, alimento.id)]"
+                                            label="Porção"
+                                            type="number"
+                                            min="1"
+                                            suffix="g"
+                                            variant="outlined"
+                                            density="compact"
+                                            hide-details
+                                        />
+                                        <v-btn
+                                            color="primary"
+                                            variant="tonal"
+                                            class="texto-botao"
+                                            @click="adicionarSubstituto(refeicao, alimento)"
+                                        >
+                                            <Icon icon="solar:add-circle-linear" width="17" class="me-1" /> Adicionar
+                                        </v-btn>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div v-else class="refeicao-vazia">
@@ -875,6 +1278,18 @@ function gerarPdf() {
                             <v-btn size="small" variant="text" color="primary" class="texto-botao" @click="refeicaoSelecionada = refeicao.nome">
                                 Escolher alimentos
                             </v-btn>
+                        </div>
+                        <div class="campos-adicionais-refeicao">
+                            <v-textarea
+                                v-model="refeicao.observacoes"
+                                label="Observações da refeição"
+                                placeholder="Orientações e observações para esta refeição"
+                                variant="outlined"
+                                density="compact"
+                                rows="1"
+                                auto-grow
+                                hide-details
+                            />
                         </div>
                     </div>
                     <div class="nota-total">
@@ -938,6 +1353,12 @@ function gerarPdf() {
                         <p class="texto-dialogo">
                             Total calculado proporcionalmente às porções adicionadas. Itens sem o dado na fonte são excluídos do total.
                         </p>
+                        <p v-if="referenciasNutrientes" class="texto-dialogo">
+                            Referências para {{ pacienteSelecionado?.nome }}, selecionadas pelo grupo e faixa etária.
+                        </p>
+                        <p v-else class="texto-dialogo">
+                            Selecione um paciente cadastrado com data de nascimento e grupo de referência para exibir as referências.
+                        </p>
                         <p v-if="planoMockCarregado" class="texto-dialogo">
                             Plano demonstrativo: micronutrientes baseados em alimentos de referência da TACO; ingredientes sem referência equivalente não entram no total.
                         </p>
@@ -951,11 +1372,49 @@ function gerarPdf() {
                                 >
                                     <strong>{{ item.nome }}</strong>
                                     <span>{{ formatarMicronutriente(item.valor, item.unidade) }}</span>
+                                    <span v-if="item.referencia" class="referencia-rda">
+                                        {{ formatarReferencia(item.referencia) }}
+                                    </span>
+                                    <span v-else class="referencia-rda">Sem referência definida</span>
                                     <small>{{ item.informados }} de {{ item.totalAlimentos }} alimentos</small>
                                 </div>
                             </template>
                         </div>
                         <p v-else class="texto-dialogo">Ainda não há micronutrientes informados para os alimentos deste plano.</p>
+                        <v-card class="cartao-grafico-macros" elevation="0">
+                            <div class="titulo-grafico">
+                                <button
+                                    type="button"
+                                    class="botao-toggle-grafico"
+                                    :aria-expanded="legendaDialogoExpandida"
+                                    aria-controls="conteudo-legenda-dialogo"
+                                    @click="legendaDialogoExpandida = !legendaDialogoExpandida"
+                                >
+                                    <Icon
+                                        :icon="legendaDialogoExpandida ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'"
+                                        width="20"
+                                    />
+                                    <span class="texto-toggle-grafico">
+                                        <strong>Significado das siglas de referência</strong>
+                                        <span>Definições das referências usadas nos valores nutricionais</span>
+                                    </span>
+                                </button>
+                            </div>
+                            <div v-if="legendaDialogoExpandida" id="conteudo-legenda-dialogo" class="legenda-referencias">
+                                <dl>
+                                    <div v-for="(referencia, sigla) in legendasReferencias" :key="sigla">
+                                        <dt>{{ sigla }}{{ sigla === 'AI' ? '*' : '' }}</dt>
+                                        <dd>
+                                            {{ referencia.descricao }}
+                                            <small class="fonte-referencia">
+                                                {{ referencia.fonte }}
+                                                <a :href="referencia.url" target="_blank" rel="noopener noreferrer">Acessar documento</a>
+                                            </small>
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </div>
+                        </v-card>
                     </template>
                     <template v-else-if="alimentoMicronutrientes">
                         <p class="nome-cientifico">
@@ -997,14 +1456,31 @@ function gerarPdf() {
                 <v-card-text>
                     <v-alert v-if="erroNovoPaciente" type="error" variant="tonal" class="mb-4">{{ erroNovoPaciente }}</v-alert>
                     <v-text-field v-model="novoPaciente.nome" label="Nome completo" variant="outlined" autofocus />
+                    <v-select v-model="novoPaciente.sexo" :items="opcoesSexo" label="Sexo" variant="outlined" clearable />
+                    <v-select
+                        v-model="novoPaciente.grupo"
+                        :items="opcoesGrupoRDA"
+                        item-title="title"
+                        item-value="value"
+                        label="Grupo de referência RDA"
+                        hint="Para menores de 9 anos, o grupo é definido pela faixa etária."
+                        persistent-hint
+                        variant="outlined"
+                        clearable
+                    />
                     <v-text-field
                         v-model="novoPaciente.dataNascimento"
                         label="Data de nascimento"
                         type="date"
                         variant="outlined"
                         max="9999-12-31"
-                        :hint="calcularIdade(novoPaciente.dataNascimento) === null ? '' : `Idade: ${calcularIdade(novoPaciente.dataNascimento)} anos`"
-                        persistent-hint
+                    />
+                    <v-text-field
+                        label="Idade"
+                        :model-value="calcularIdade(novoPaciente.dataNascimento) ?? ''"
+                        suffix="anos"
+                        variant="outlined"
+                        readonly
                         class="mb-4"
                     />
                     <v-text-field v-model="novoPaciente.email" label="E-mail" type="email" variant="outlined" />
@@ -1030,6 +1506,21 @@ function gerarPdf() {
     .v-input { flex: 1; }
     .v-btn { min-height: 56px; }
 }
+.dados-paciente-referencia { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: -8px 0 16px; color: #647282; font-size: 13px; }
+.dados-paciente-referencia strong { color: #34495c; }
+.alerta-eer { font-size: 13px; line-height: 1.5; }
+.alerta-eer :deep(.v-alert__content) { min-width: 0; width: 100%; }
+.valor-eer-plano { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 14px; }
+.rotulo-eer { color: #168ba4; font-size: 13px; font-weight: 700; }
+.valor-eer-plano strong { color: #0a2540; font-size: 20px; font-weight: 700; }
+.valor-eer-plano small { font-size: 13px; font-weight: 600; }
+.rotulo-ajuste-eer { display: block; margin-bottom: 4px; color: #34495c; font-size: 12px; font-weight: 600; }
+.ajuda-ajuste-eer { margin: 3px 0 0; color: #647282; font-size: 11px; }
+.cartao-dados-plano :deep(.v-label) { color: #34495c; font-weight: 700; opacity: 1; }
+.campo-objetivo-nutricional :deep(.v-label) { color: #34495c; font-weight: 700; }
+.objetivo-eer-detalhe { margin: 0 0 10px; color: #0a2540; }
+.formula-eer { overflow-wrap: anywhere; margin-top: 6px; }
+.fonte-eer { display: block; margin-top: 8px; color: #647282; }
 .pagina-criar-plano { color: #0a2540; }
 .cabecalho-pagina { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
 .cabecalho-pagina h1 { margin: 10px 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
@@ -1039,13 +1530,17 @@ function gerarPdf() {
 .texto-introdutorio, .titulo-secao p, .cartao-nutricao small { margin: 0; color: #7b8893; font-size: 13px; }
 .acoes-cabecalho { display: flex; gap: 10px; }
 .texto-botao { text-transform: none; }
-.cartoes-nutricao { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.cartoes-nutricao { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
 .cartao-nutricao { display: flex; min-height: 108px; flex-direction: column; justify-content: center; gap: 3px; padding: 16px 20px; border: 1px solid #e8edf2; border-radius: 12px; }
 .cartao-nutricao span { color: #647282; font-size: 13px; }
 .cartao-nutricao strong { color: #0a2540; font-size: 21px; font-weight: 700; }
 .cartao-nutricao small { line-height: 1.4; }
-.cartao-nutricao.micros-resumo { align-items: flex-start; }
+.cartao-nutricao.micros-resumo { align-items: flex-start; border-left: 3px solid #14b8a6; }
 .cartao-nutricao.micros-resumo .v-btn { margin-top: 5px; }
+@media (max-width: 1024px) {
+    .cartoes-nutricao { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .cartao-nutricao { min-height: 120px; padding: 14px; }
+}
 .cartao-grafico-macros { margin-top: 14px; padding: 18px 22px 10px; border: 1px solid #e8edf2; border-radius: 12px; }
 .titulo-grafico { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .botao-toggle-grafico { display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px; padding: 0; border: 0; color: #635bff; text-align: left; background: transparent; cursor: pointer; }
@@ -1057,10 +1552,13 @@ function gerarPdf() {
 .texto-sem-grafico { padding: 22px 0; }
 .cartao-nutricao.proteina { border-left: 3px solid #28a66a; }
 .cartao-nutricao.energia { border-left: 3px solid #635bff; }
+.cartao-nutricao.objetivo-energetico { border-left: 3px solid #25b8d5; }
 .cartao-nutricao.carboidrato { border-left: 3px solid #e39b25; }
 .cartao-nutricao.gordura { border-left: 3px solid #e66c83; }
 .aviso-dados { margin: 10px 0 0; color: #977019; font-size: 12px; }
 .cartao-conteudo { height: 100%; padding: 22px; border: 1px solid #e8edf2; border-radius: 12px; }
+.coluna-distribuicao { display: flex; flex-direction: column; }
+.coluna-distribuicao > .cartao-grafico-macros:first-child { flex: 1 1 auto; margin-top: 0; }
 .titulo-secao { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .titulo-secao h2 { margin: 0 0 4px; font-size: 17px; font-weight: 700; }
 .icone-secao { display: grid; width: 42px; height: 42px; flex-shrink: 0; place-items: center; border-radius: 11px; color: #635bff; background: #f0efff; }
@@ -1071,6 +1569,16 @@ function gerarPdf() {
 .cabecalho-resultados { display: flex; justify-content: space-between; margin: 18px 0 10px; color: #647282; font-size: 12px; }
 .cabecalho-resultados strong { color: #0a2540; }
 .lista-alimentos { display: flex; max-height: 570px; flex-direction: column; gap: 9px; overflow-y: auto; padding-right: 3px; }
+/* No desktop, a lista acompanha a altura do card de refeições sem aumentá-la */
+@media (min-width: 1280px) {
+    .cartao-alimentos { display: flex; flex-direction: column; }
+    .cartao-alimentos > :deep(.v-input),
+    .cartao-alimentos > :deep(.v-alert) { flex-grow: 0; }
+    .cartao-alimentos > :deep(.botao-criar-alimento) { flex: 0 0 auto; }
+    .area-lista-alimentos { position: relative; flex: 1 1 0; min-height: 320px; }
+    .area-lista-alimentos .lista-alimentos { position: absolute; inset: 0; max-height: none; }
+    .cartao-alimentos .sem-resultados { flex: 1; }
+}
 .item-alimento { padding: 12px; border: 1px solid #edf0f4; border-radius: 10px; }
 .alimento-cabecalho, .rodape-alimento { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .alimento-nome { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
@@ -1093,13 +1601,25 @@ function gerarPdf() {
 .cabecalho-refeicao h3 { margin: 0 0 3px; font-size: 14px; font-weight: 700; }
 .cabecalho-refeicao span { color: #8995a1; font-size: 11px; }
 .refeicao-vazia { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 14px; color: #8995a1; font-size: 12px; }
+.campos-adicionais-refeicao { padding: 10px 14px 14px; }
 .itens-refeicao { padding: 0 14px; }
+.item-refeicao-container + .item-refeicao-container { border-top: 1px solid #f0f2f5; }
 .linha-refeicao { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #f0f2f5; }
 .detalhe-refeicao { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
 .detalhe-refeicao strong { width: 100%; overflow: hidden; color: #34495c; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .nutrientes-item-refeicao { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 .nutrientes-item-refeicao span { color: #7b8893; font-size: 10px; }
 .botao-micro-item { margin-left: -8px; }
+.item-refeicao-container .linha-refeicao { border-top: 0; }
+.campo-substituicao-alimento { display: grid; gap: 8px; padding: 0 0 10px; }
+.descricao-substituicao-legada { padding: 8px 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfd; }
+.descricao-substituicao-legada strong { color: #647282; font-size: 11px; }
+.descricao-substituicao-legada p { margin: 4px 0 0; color: #526170; font-size: 12px; white-space: pre-line; }
+.substituto-selecionado { padding: 8px 10px; border: 1px solid #edf0f4; border-radius: 8px; }
+.cabecalho-substituto { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cabecalho-substituto strong { color: #34495c; font-size: 12px; font-weight: 600; }
+.campos-novo-substituto { display: grid; grid-template-columns: minmax(0, 1fr) 100px; align-items: center; gap: 8px; }
+.campos-novo-substituto > :deep(.v-btn) { grid-column: 1 / -1; justify-self: end; }
 .campo-gramas { width: 120px; min-width: 120px; flex: 0 0 120px; }
 .nota-total { display: flex; align-items: flex-start; gap: 8px; margin: 16px 0 0; color: #7b8893; font-size: 11px; line-height: 1.5; }
 .nota-total :deep(svg) { flex-shrink: 0; color: #635bff; }
@@ -1115,10 +1635,17 @@ function gerarPdf() {
 .nome-cientifico strong { color: #0a2540; }
 .lista-micronutrientes h3 { margin: 18px 0 8px; color: #0a2540; font-size: 14px; font-weight: 700; }
 .lista-micronutrientes h3:first-child { margin-top: 0; }
-.linha-micronutriente { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, auto) minmax(120px, auto); align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f0f2f5; font-size: 13px; }
+.linha-micronutriente { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, minmax(110px, auto)); align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f0f2f5; font-size: 13px; }
 .linha-micronutriente strong { color: #34495c; font-weight: 600; }
 .linha-micronutriente > span { color: #0a2540; text-align: right; }
+.linha-micronutriente .referencia-rda { color: #635bff; font-weight: 600; }
 .linha-micronutriente small { color: #8995a1; font-size: 11px; text-align: right; }
+.legenda-referencias { color: #647282; font-size: 12px; line-height: 1.5; }
+.legenda-referencias dl { display: grid; gap: 8px; margin: 12px 0 0; }
+.legenda-referencias dl > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }
+.legenda-referencias dt { color: #0a2540; font-weight: 700; }
+.legenda-referencias dd { margin: 0; }
+.fonte-referencia { display: block; margin-top: 2px; color: #8995a1; font-size: 11px; }
 @media (max-width: 800px) {
     .cabecalho-pagina { align-items: flex-start; flex-direction: column; }
     .acoes-cabecalho { width: 100%; }
@@ -1132,9 +1659,10 @@ function gerarPdf() {
     .cartao-conteudo { padding: 16px; }
     .nutrientes-alimento { grid-template-columns: repeat(2, 1fr); row-gap: 8px; }
     .linha-filtros { grid-template-columns: 1fr; }
+    .campos-adicionais-refeicao { grid-template-columns: 1fr; }
     .cabecalho-pagina h1 { font-size: 24px; }
     .acoes-alimento { align-items: flex-end; flex-direction: column; }
     .linha-micronutriente { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; }
-    .linha-micronutriente small { grid-column: 1 / -1; text-align: left; }
+    .linha-micronutriente .referencia-rda, .linha-micronutriente small { grid-column: 1 / -1; text-align: left; }
 }
 </style>

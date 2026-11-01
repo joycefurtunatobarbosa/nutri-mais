@@ -6,16 +6,21 @@ import {
     calcularIdade,
     criarPaciente,
     excluirPaciente,
-    formatarDataNascimento,
     lerPacientes,
+    opcoesGrupoRDA,
+    opcoesNivelAtividadeFisica,
+    opcoesObjetivoNutricional,
+    rotuloGrupoRDA,
     type DadosPaciente,
-    type Paciente
+    type Paciente,
+    type SexoPaciente
 } from '@/dados/pacientes';
 
 const pacientes = ref<Paciente[]>([]);
 const busca = ref('');
 const dialogoFormulario = ref(false);
 const dialogoExclusao = ref(false);
+const abaFormulario = ref('pessoais');
 const pacienteEditandoId = ref<number | null>(null);
 const pacienteParaExcluir = ref<Paciente | null>(null);
 const erroFormulario = ref('');
@@ -24,10 +29,33 @@ const corNotificacao = ref<'success' | 'error'>('success');
 const notificacaoAberta = ref(false);
 
 function formularioVazio(): DadosPaciente {
-    return { nome: '', dataNascimento: '', email: '', telefone: '', observacoes: '' };
+    return {
+        nome: '',
+        dataNascimento: '',
+        sexo: null,
+        grupo: null,
+        objetivoNutricional: null,
+        pesoKg: null,
+        alturaCm: null,
+        nivelAtividadeFisica: null,
+        estagioFisiologicoEER: 'Nenhum',
+        semanasGestacao: null,
+        classificacaoPesoGestacional: null,
+        email: '',
+        telefone: '',
+        observacoes: ''
+    };
 }
 
 const formulario = ref<DadosPaciente>(formularioVazio());
+const opcoesSexo: SexoPaciente[] = ['Feminino', 'Masculino', 'Outro', 'Prefiro não informar'];
+const opcoesEstagioEER = [
+    { title: 'Não se aplica', value: 'Nenhum' },
+    { title: 'Gestação', value: 'Gestação' },
+    { title: 'Aleitamento exclusivo (0 a 6 meses pós-parto)', value: 'Aleitamento exclusivo (0–6 meses)' },
+    { title: 'Aleitamento parcial (7 a 12 meses pós-parto)', value: 'Aleitamento parcial (7–12 meses)' }
+];
+const opcoesClassificacaoGestacional = ['Baixo peso', 'Peso normal', 'Sobrepeso', 'Obesidade'];
 
 const pacientesFiltrados = computed(() => {
     const termo = busca.value.trim().toLocaleLowerCase('pt-BR');
@@ -47,6 +75,10 @@ function notificar(texto: string, cor: 'success' | 'error' = 'success') {
     notificacaoAberta.value = true;
 }
 
+function normalizarMedida(valor: number | null): number | null {
+    return typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+}
+
 function iniciais(nome: string) {
     return nome.split(' ').filter(Boolean).map((parte) => parte[0]).slice(0, 2).join('').toLocaleUpperCase('pt-BR');
 }
@@ -54,6 +86,7 @@ function iniciais(nome: string) {
 function abrirNovo() {
     pacienteEditandoId.value = null;
     formulario.value = formularioVazio();
+    abaFormulario.value = 'pessoais';
     erroFormulario.value = '';
     dialogoFormulario.value = true;
 }
@@ -63,10 +96,20 @@ function abrirEdicao(paciente: Paciente) {
     formulario.value = {
         nome: paciente.nome,
         dataNascimento: paciente.dataNascimento,
+        sexo: paciente.sexo,
+        grupo: paciente.grupo,
+        objetivoNutricional: paciente.objetivoNutricional,
+        pesoKg: paciente.pesoKg,
+        alturaCm: paciente.alturaCm,
+        nivelAtividadeFisica: paciente.nivelAtividadeFisica,
+        estagioFisiologicoEER: paciente.estagioFisiologicoEER,
+        semanasGestacao: paciente.semanasGestacao,
+        classificacaoPesoGestacional: paciente.classificacaoPesoGestacional,
         email: paciente.email,
         telefone: paciente.telefone,
         observacoes: paciente.observacoes
     };
+    abaFormulario.value = 'pessoais';
     erroFormulario.value = '';
     dialogoFormulario.value = true;
 }
@@ -75,6 +118,15 @@ function salvar() {
     const dados: DadosPaciente = {
         nome: formulario.value.nome.trim(),
         dataNascimento: formulario.value.dataNascimento,
+        sexo: formulario.value.sexo,
+        grupo: formulario.value.grupo,
+        objetivoNutricional: formulario.value.objetivoNutricional,
+        pesoKg: normalizarMedida(formulario.value.pesoKg),
+        alturaCm: normalizarMedida(formulario.value.alturaCm),
+        nivelAtividadeFisica: formulario.value.nivelAtividadeFisica,
+        estagioFisiologicoEER: formulario.value.estagioFisiologicoEER,
+        semanasGestacao: normalizarMedida(formulario.value.semanasGestacao),
+        classificacaoPesoGestacional: formulario.value.classificacaoPesoGestacional,
         email: formulario.value.email.trim(),
         telefone: formulario.value.telefone.trim(),
         observacoes: formulario.value.observacoes.trim()
@@ -87,6 +139,12 @@ function salvar() {
 
     if (dados.dataNascimento && (calcularIdade(dados.dataNascimento) === null || dados.dataNascimento < '1900-01-01')) {
         erroFormulario.value = 'Informe uma data de nascimento válida.';
+        return;
+    }
+
+    if ((dados.pesoKg !== null && dados.pesoKg <= 0) || (dados.alturaCm !== null && dados.alturaCm <= 0)) {
+        erroFormulario.value = 'Peso e altura devem ser maiores que zero.';
+        abaFormulario.value = 'nutricao';
         return;
     }
 
@@ -171,11 +229,11 @@ onMounted(() => {
                     <thead>
                         <tr>
                             <th>Paciente</th>
-                            <th>Nascimento</th>
+                            <th>Sexo</th>
+                            <th>Grupo RDA</th>
                             <th>Idade</th>
                             <th>E-mail</th>
-                            <th>Telefone</th>
-                            <th>Observações</th>
+                            <th>Objetivo nutricional</th>
                             <th>Editar</th>
                             <th>Excluir</th>
                         </tr>
@@ -188,11 +246,11 @@ onMounted(() => {
                                     <span>{{ paciente.nome }}</span>
                                 </div>
                             </td>
-                            <td>{{ formatarDataNascimento(paciente.dataNascimento) }}</td>
+                            <td>{{ paciente.sexo || '—' }}</td>
+                            <td>{{ rotuloGrupoRDA(paciente.grupo) }}</td>
                             <td>{{ calcularIdade(paciente.dataNascimento) === null ? '—' : `${calcularIdade(paciente.dataNascimento)} anos` }}</td>
                             <td>{{ paciente.email || '—' }}</td>
-                            <td>{{ paciente.telefone || '—' }}</td>
-                            <td class="celula-observacoes">{{ paciente.observacoes || '—' }}</td>
+                            <td class="celula-objetivo">{{ paciente.objetivoNutricional || '—' }}</td>
                             <td>
                                 <v-btn
                                     icon
@@ -232,25 +290,131 @@ onMounted(() => {
             </div>
         </v-card>
 
-        <v-dialog v-model="dialogoFormulario" max-width="520">
-            <v-card>
+        <v-dialog v-model="dialogoFormulario" max-width="700" scrollable>
+            <v-card class="formulario-paciente">
                 <v-card-title>{{ pacienteEditandoId === null ? 'Novo paciente' : 'Editar paciente' }}</v-card-title>
                 <v-card-text>
                     <v-alert v-if="erroFormulario" type="error" variant="tonal" class="mb-4">{{ erroFormulario }}</v-alert>
-                    <v-text-field v-model="formulario.nome" label="Nome completo" variant="outlined" autofocus />
-                    <v-text-field
-                        v-model="formulario.dataNascimento"
-                        label="Data de nascimento"
-                        type="date"
-                        variant="outlined"
-                        max="9999-12-31"
-                        :hint="calcularIdade(formulario.dataNascimento) === null ? '' : `Idade: ${calcularIdade(formulario.dataNascimento)} anos`"
-                        persistent-hint
-                        class="mb-4"
-                    />
-                    <v-text-field v-model="formulario.email" label="E-mail" type="email" variant="outlined" />
-                    <v-text-field v-model="formulario.telefone" label="Telefone" variant="outlined" />
-                    <v-textarea v-model="formulario.observacoes" label="Observações" variant="outlined" rows="3" hide-details />
+                    <v-tabs v-model="abaFormulario" class="mb-5">
+                        <v-tab value="pessoais">Dados pessoais</v-tab>
+                        <v-tab value="nutricao">Nutrição e EER</v-tab>
+                    </v-tabs>
+                    <v-window v-model="abaFormulario">
+                        <v-window-item value="pessoais">
+                            <v-text-field v-model="formulario.nome" label="Nome completo" variant="outlined" autofocus />
+                            <v-select v-model="formulario.sexo" :items="opcoesSexo" label="Sexo" variant="outlined" clearable />
+                            <v-select
+                                v-model="formulario.grupo"
+                                :items="opcoesGrupoRDA"
+                                item-title="title"
+                                item-value="value"
+                                label="Grupo de referência RDA"
+                                hint="Para menores de 9 anos, o grupo é definido pela faixa etária."
+                                persistent-hint
+                                variant="outlined"
+                                clearable
+                            />
+                            <v-text-field
+                                v-model="formulario.dataNascimento"
+                                label="Data de nascimento"
+                                type="date"
+                                variant="outlined"
+                                max="9999-12-31"
+                            />
+                            <v-text-field
+                                label="Idade"
+                                :model-value="calcularIdade(formulario.dataNascimento) ?? ''"
+                                suffix="anos"
+                                variant="outlined"
+                                readonly
+                            />
+                            <v-text-field v-model="formulario.email" label="E-mail" type="email" variant="outlined" />
+                            <v-text-field v-model="formulario.telefone" label="Telefone" variant="outlined" />
+                            <v-textarea v-model="formulario.observacoes" label="Observações" variant="outlined" rows="3" hide-details />
+                        </v-window-item>
+                        <v-window-item value="nutricao">
+                            <v-select
+                                v-model="formulario.objetivoNutricional"
+                                :items="opcoesObjetivoNutricional"
+                                label="Objetivo nutricional"
+                                variant="outlined"
+                                clearable
+                            />
+                            <v-row>
+                                <v-col cols="12" sm="6">
+                                    <v-text-field
+                                        v-model.number="formulario.pesoKg"
+                                        label="Peso"
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        suffix="kg"
+                                        variant="outlined"
+                                    />
+                                </v-col>
+                                <v-col cols="12" sm="6">
+                                    <v-text-field
+                                        v-model.number="formulario.alturaCm"
+                                        label="Altura"
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        suffix="cm"
+                                        variant="outlined"
+                                    />
+                                </v-col>
+                            </v-row>
+                            <v-select
+                                v-model="formulario.nivelAtividadeFisica"
+                                :items="opcoesNivelAtividadeFisica"
+                                item-title="title"
+                                item-value="value"
+                                label="Nível de atividade física"
+                                hint="Categorias PAL usadas pelas equações EER do National Academies (2023). Não há conversão direta de frequência semanal para PAL."
+                                persistent-hint
+                                variant="outlined"
+                                clearable
+                            />
+                            <p class="fonte-atividade">
+                                Para referência geral de atividade física no Brasil, consulte o
+                                <a
+                                    href="https://bvsms.saude.gov.br/bvs/publicacoes/guia_atividade_fisica_populacao_brasileira.pdf"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >Guia de Atividade Física para a População Brasileira</a>
+                                (Ministério da Saúde).
+                            </p>
+                            <v-select
+                                v-model="formulario.estagioFisiologicoEER"
+                                :items="opcoesEstagioEER"
+                                item-title="title"
+                                item-value="value"
+                                label="Gestação ou aleitamento"
+                                variant="outlined"
+                            />
+                            <template v-if="formulario.estagioFisiologicoEER === 'Gestação'">
+                                <v-text-field
+                                    v-model.number="formulario.semanasGestacao"
+                                    label="Semanas de gestação"
+                                    type="number"
+                                    min="1"
+                                    max="42"
+                                    step="1"
+                                    variant="outlined"
+                                />
+                                <v-select
+                                    v-if="(formulario.semanasGestacao ?? 0) >= 14"
+                                    v-model="formulario.classificacaoPesoGestacional"
+                                    :items="opcoesClassificacaoGestacional"
+                                    label="Classificação de peso gestacional"
+                                    hint="Use a classificação pré-gestacional registrada no atendimento."
+                                    persistent-hint
+                                    variant="outlined"
+                                    clearable
+                                />
+                            </template>
+                        </v-window-item>
+                    </v-window>
                 </v-card-text>
                 <v-card-actions class="px-6 pb-6">
                     <v-spacer />
@@ -318,7 +482,7 @@ onMounted(() => {
 }
 .paciente-celula { display: flex; align-items: center; gap: 12px; color: #0a2540; font-weight: 600; white-space: nowrap; }
 .avatar-paciente { color: #635bff; font-size: 12px; font-weight: 700; }
-.celula-observacoes { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.celula-objetivo { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .estado-vazio {
     height: 190px;
     color: #7b8893 !important;
@@ -327,6 +491,10 @@ onMounted(() => {
     strong { color: #0a2540; }
     span { font-size: 13px; }
 }
+.formula-eer { overflow-wrap: anywhere; }
+.formulario-paciente :deep(.v-label) { color: #34495c; font-weight: 700; opacity: 1; }
+.fonte-atividade { margin: -12px 0 20px; color: #647282; font-size: 12px; line-height: 1.5; }
+.fonte-atividade a { color: #635bff; }
 @media (max-width: 700px) {
     .cabecalho-pagina {
         align-items: flex-start;
