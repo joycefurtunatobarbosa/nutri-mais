@@ -3,7 +3,6 @@ import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { descriptografarPlano, type PlanoPacienteCompartilhado } from '@/dados/compartilhamentoPlano';
 import { normalizarRefeicaoPlano, type AlimentoNoPlano } from '@/dados/planosSalvos';
-import { gerarPdfPlano } from '@/utils/gerarPdfPlano';
 
 const token = new URLSearchParams(window.location.hash.slice(1)).get('plano');
 const senha = ref('');
@@ -78,7 +77,7 @@ function caloriasDaRefeicao(alimentos: AlimentoNoPlano[]): number | null {
     );
 }
 
-function gerarPdf() {
+async function gerarPdf() {
     if (!plano.value) {
         return;
     }
@@ -87,6 +86,7 @@ function gerarPdf() {
     erro.value = '';
 
     try {
+        const { gerarPdfPlano } = await import('@/utils/gerarPdfPlano');
         gerarPdfPlano({
             paciente: plano.value.paciente,
             objetivo: plano.value.objetivo,

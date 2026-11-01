@@ -3,9 +3,9 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { criptografarPlano } from '@/dados/compartilhamentoPlano';
+import { carregarAlimentosBase } from '@/dados/alimentos';
 import { gerarCodigoHashPlano, obterPlanoMock, planosMock, type StatusPlanoMock } from '@/dados/planosMock';
 import { lerPlanosSalvos, normalizarRefeicaoPlano, type RefeicaoPlano } from '@/dados/planosSalvos';
-import { gerarPdfPlano } from '@/utils/gerarPdfPlano';
 
 interface PlanoAlimentar {
     id: number;
@@ -30,6 +30,7 @@ const notificacaoAberta = ref(false);
 const gerandoPdfId = ref<number | null>(null);
 const dialogoCompartilhamento = ref(false);
 const planoSelecionado = ref<PlanoAlimentar | null>(null);
+const versaoBaseAlimentos = ref(0);
 const senhaCompartilhamento = ref('');
 const linkCompartilhamento = ref('');
 const erroCompartilhamento = ref('');
@@ -81,11 +82,18 @@ const planoTemRefeicoes = computed(() =>
 );
 
 function itensDoPlano(plano: PlanoAlimentar): RefeicaoPlano[] {
+    void versaoBaseAlimentos.value;
+
     if (plano.itens?.length) {
         return plano.itens;
     }
 
     return obterPlanoMock(plano.id)?.itens.map(normalizarRefeicaoPlano) ?? [];
+}
+
+async function garantirBaseAlimentosParaPlanoMock(): Promise<void> {
+    await carregarAlimentosBase();
+    versaoBaseAlimentos.value += 1;
 }
 
 const planoParaCompartilhar = computed(() => {
@@ -146,10 +154,7 @@ function atualizarDialogoCompartilhamento(aberto: boolean) {
 }
 
 async function gerarLinkCompartilhado() {
-    const plano = planoParaCompartilhar.value;
-    const itens = plano?.itens ?? [];
-
-    if (!plano || !itens.some((refeicao) => refeicao.alimentos.length)) {
+    if (!planoSelecionado.value) {
         erroCompartilhamento.value = 'Este plano não tem refeições para compartilhar.';
         return;
     }
@@ -163,6 +168,17 @@ async function gerarLinkCompartilhado() {
     erroCompartilhamento.value = '';
 
     try {
+        if (!planoSelecionado.value.itens) {
+            await garantirBaseAlimentosParaPlanoMock();
+        }
+
+        const plano = planoParaCompartilhar.value;
+        const itens = plano?.itens ?? [];
+        if (!plano || !itens.some((refeicao) => refeicao.alimentos.length)) {
+            erroCompartilhamento.value = 'Este plano não tem refeições para compartilhar.';
+            return;
+        }
+
         const token = await criptografarPlano(
             {
                 paciente: plano.paciente,
@@ -203,19 +219,23 @@ async function copiarLinkCompartilhado() {
     }
 }
 
-function gerarPdfDoPlano(plano: PlanoAlimentar) {
-    const itens = itensDoPlano(plano);
-
-    if (!itens.some((refeicao) => refeicao.alimentos.length)) {
-        mensagem.value = 'Este plano não tem refeições cadastradas para gerar o PDF.';
-        corNotificacao.value = 'error';
-        notificacaoAberta.value = true;
-        return;
-    }
-
+async function gerarPdfDoPlano(plano: PlanoAlimentar) {
     gerandoPdfId.value = plano.id;
 
     try {
+        if (!plano.itens) {
+            await garantirBaseAlimentosParaPlanoMock();
+        }
+
+        const itens = itensDoPlano(plano);
+        if (!itens.some((refeicao) => refeicao.alimentos.length)) {
+            mensagem.value = 'Este plano não tem refeições cadastradas para gerar o PDF.';
+            corNotificacao.value = 'error';
+            notificacaoAberta.value = true;
+            return;
+        }
+
+        const { gerarPdfPlano } = await import('@/utils/gerarPdfPlano');
         gerarPdfPlano({
             paciente: plano.paciente,
             objetivo: plano.objetivo,

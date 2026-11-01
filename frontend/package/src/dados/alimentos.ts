@@ -1,6 +1,3 @@
-import tabelaTaco from '@/data/alimentos/taco.json';
-import tabelaTucunduva from '@/data/alimentos/tucunduva.json';
-
 export type FonteAlimento = 'TACO' | 'Tucunduva' | 'Personalizado';
 export type ValorMicronutriente = number | 'Tr' | null;
 
@@ -175,10 +172,45 @@ function normalizarTucunduva(
     }));
 }
 
-const registrosTaco = tabelaTaco as { alimentos: RegistroTaco[] };
-const registrosTucunduva = tabelaTucunduva as RegistroTucunduva[];
+let alimentosBase: Alimento[] | undefined;
+let alimentosPorNome: Map<string, Alimento> | undefined;
+let carregamentoAlimentos: Promise<Alimento[]> | undefined;
 
-export const alimentosBase: Alimento[] = [
-    ...normalizarTaco(registrosTaco.alimentos),
-    ...normalizarTucunduva(registrosTucunduva, 'Tucunduva')
-];
+export function obterAlimentoBasePorNome(nome: string): Alimento | undefined {
+    return alimentosPorNome?.get(nome);
+}
+
+export function carregarAlimentosBase(): Promise<Alimento[]> {
+    if (alimentosBase) {
+        return Promise.resolve(alimentosBase);
+    }
+
+    if (!carregamentoAlimentos) {
+        carregamentoAlimentos = Promise.all([
+            import('@/data/alimentos/taco.json'),
+            import('@/data/alimentos/tucunduva.json')
+        ])
+            .then(([tabelaTaco, tabelaTucunduva]) => {
+                const registrosTaco = tabelaTaco.default as { alimentos: RegistroTaco[] };
+                const registrosTucunduva = tabelaTucunduva.default as RegistroTucunduva[];
+
+                alimentosBase = [
+                    ...normalizarTaco(registrosTaco.alimentos),
+                    ...normalizarTucunduva(registrosTucunduva, 'Tucunduva')
+                ];
+                alimentosPorNome = new Map();
+                for (const alimento of alimentosBase) {
+                    if (!alimentosPorNome.has(alimento.nome)) {
+                        alimentosPorNome.set(alimento.nome, alimento);
+                    }
+                }
+                return alimentosBase;
+            })
+            .catch((falha: unknown) => {
+                carregamentoAlimentos = undefined;
+                throw falha;
+            });
+    }
+
+    return carregamentoAlimentos;
+}

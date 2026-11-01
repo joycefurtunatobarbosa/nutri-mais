@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import {
-    alimentosBase,
+    carregarAlimentosBase,
     fontesDadosAlimentos,
     type Alimento,
     type FonteAlimento,
@@ -40,8 +40,8 @@ import {
     type PlanoAlimentarSalvo,
     type RefeicaoPlano
 } from '@/dados/planosSalvos';
-import { gerarPdfPlano } from '@/utils/gerarPdfPlano';
 
+const ApexChart = defineAsyncComponent(() => import('vue3-apexcharts'));
 const route = useRoute();
 const router = useRouter();
 const fontes: FonteAlimento[] = ['TACO', 'Tucunduva', 'Personalizado'];
@@ -153,6 +153,8 @@ function salvarNovoPaciente() {
 const ajusteCaloricoEER = ref(0);
 const nomeNutricionista = ref('');
 const busca = ref('');
+const alimentosBase = shallowRef<Alimento[]>([]);
+const carregandoAlimentos = ref(false);
 const filtroFonte = ref<FonteAlimento | 'Todas as fontes'>('Todas as fontes');
 const quantidadeBusca = ref(100);
 const dialogoPersonalizado = ref(false);
@@ -176,6 +178,40 @@ const planoMockCarregado = ref(false);
 const planoSalvoId = ref<number | null>(null);
 const statusPlanoCarregado = ref<PlanoAlimentarSalvo['status']>('Rascunho');
 const erroPlanoMock = ref('');
+let carregamentoAlimentosAtual: Promise<void> | null = null;
+
+function garantirAlimentosCarregados(): Promise<void> {
+    if (alimentosBase.value.length) {
+        return Promise.resolve();
+    }
+
+    if (carregamentoAlimentosAtual) {
+        return carregamentoAlimentosAtual;
+    }
+
+    carregandoAlimentos.value = true;
+    carregamentoAlimentosAtual = carregarAlimentosBase()
+        .then((alimentos) => {
+            alimentosBase.value = alimentos;
+
+            if (typeof route.params.codigo === 'string' && route.params.codigo.startsWith('m-')) {
+                const plano = obterPlanoMockPorCodigo(route.params.codigo);
+                if (plano) {
+                    refeicoes.value = plano.itens.map(normalizarRefeicaoPlano);
+                }
+            }
+        })
+        .catch((falha: unknown) => {
+            console.error('Não foi possível carregar a tabela de alimentos.', falha);
+            erro.value = 'Não foi possível carregar a tabela de alimentos. Atualize a página e tente novamente.';
+        })
+        .finally(() => {
+            carregandoAlimentos.value = false;
+            carregamentoAlimentosAtual = null;
+        });
+
+    return carregamentoAlimentosAtual;
+}
 
 watch(
     () => route.params.codigo,
@@ -216,6 +252,7 @@ watch(
             refeicoes.value = plano.itens.map(normalizarRefeicaoPlano);
             refeicaoSelecionada.value = refeicoes.value[0]?.nome ?? refeicoesPadrao[0];
             planoMockCarregado.value = true;
+            void garantirAlimentosCarregados();
             return;
         }
 
@@ -262,7 +299,7 @@ const novoAlimento = ref({
 const alimentosCorrespondentes = computed(() => {
     const termo = busca.value.trim().toLocaleLowerCase('pt-BR');
 
-    return alimentosBase.filter((alimento) => {
+    return alimentosBase.value.filter((alimento) => {
         const correspondeBusca =
             !termo ||
             alimento.nome.toLocaleLowerCase('pt-BR').includes(termo) ||
@@ -273,7 +310,12 @@ const alimentosCorrespondentes = computed(() => {
     });
 });
 
-const alimentosEncontrados = computed(() => alimentosCorrespondentes.value);
+const alimentosEncontrados = computed(() => alimentosCorrespondentes.value.slice(0, 50));
+watch(busca, (termo) => {
+    if (termo.trim()) {
+        void garantirAlimentosCarregados();
+    }
+});
 const todasAsPorcoes = computed(() =>
     refeicoes.value.reduce<AlimentoNoPlano[]>((porcoes, refeicao) => {
         porcoes.push(...refeicao.alimentos);
@@ -586,6 +628,7 @@ function alternarSubstituicao(refeicao: RefeicaoPlano, alimento: AlimentoNoPlano
     if (abertas.has(chave)) {
         abertas.delete(chave);
     } else {
+        void garantirAlimentosCarregados();
         abertas.add(chave);
         quantidadesSubstitutos.value[chave] ??= 100;
     }
@@ -760,7 +803,7 @@ function salvarRascunho() {
     }
 }
 
-function gerarPdf() {
+async function gerarPdf() {
     if (!nomePaciente.value.trim() || !objetivo.value.trim()) {
         erro.value = 'Informe o nome do paciente e o objetivo antes de gerar o PDF.';
         return;
@@ -775,6 +818,7 @@ function gerarPdf() {
     erro.value = '';
 
     try {
+        const { gerarPdfPlano } = await import('@/utils/gerarPdfPlano');
         gerarPdfPlano({
             paciente: nomePaciente.value.trim(),
             objetivo: objetivo.value.trim(),
@@ -789,6 +833,7 @@ function gerarPdf() {
         gerandoPdf.value = false;
     }
 }
+
 </script>
 
 <template>
@@ -954,7 +999,7 @@ function gerarPdf() {
                     <div id="conteudo-distribuicao-energetica">
                         <p class="legenda-calorica">Carboidratos e proteínas: 4 kcal/g · Gorduras: 9 kcal/g</p>
                         <template v-if="resumo.calorias !== null && resumo.calorias > 0 && participacaoEnergetica.some((macro) => macro.percentual !== null)">
-                            <apexchart
+                            <ApexChart
                                 v-if="tipoGraficoMacronutrientes === 'bar'"
                                 key="grafico-barras"
                                 type="bar"
@@ -962,7 +1007,7 @@ function gerarPdf() {
                                 :options="opcoesGraficoMacronutrientes"
                                 :series="serieGraficoMacronutrientes"
                             />
-                            <apexchart
+                            <ApexChart
                                 v-else
                                 key="grafico-pizza"
                                 type="pie"
@@ -1079,7 +1124,13 @@ function gerarPdf() {
                                 : `${alimentosEncontrados.length} de ${alimentosCorrespondentes.length} resultados` }}
                         </span>
                     </div>
-                    <div v-if="alimentosEncontrados.length" class="area-lista-alimentos">
+                    <div v-if="carregandoAlimentos" class="sem-resultados">
+                        Carregando tabela de alimentos...
+                    </div>
+                    <div v-else-if="!alimentosBase.length" class="sem-resultados">
+                        Digite o nome de um alimento para carregar a tabela.
+                    </div>
+                    <div v-else-if="alimentosEncontrados.length" class="area-lista-alimentos">
                     <div class="lista-alimentos">
                         <article v-for="alimento in alimentosEncontrados" :key="alimento.id" class="item-alimento">
                             <div class="alimento-cabecalho">

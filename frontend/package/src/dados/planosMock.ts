@@ -1,4 +1,4 @@
-import { alimentosBase } from './alimentos';
+import { obterAlimentoBasePorNome } from './alimentos';
 import type { AlimentoNoPlano, RefeicaoPlano } from './planosSalvos';
 
 export type StatusPlanoMock = 'Ativo' | 'Rascunho' | 'Concluído';
@@ -16,6 +16,14 @@ export interface PlanoMock {
 
 export interface PlanoMockComRefeicoes extends PlanoMock {
     itens: RefeicaoPlano[];
+}
+
+interface AlimentoMock extends AlimentoNoPlano {
+    referenciaMicronutrientes?: string;
+}
+
+interface RefeicaoMock extends Omit<RefeicaoPlano, 'alimentos'> {
+    alimentos: AlimentoMock[];
 }
 
 const NUTRICIONISTA_PADRAO = 'Dra. Camila Rodrigues';
@@ -55,11 +63,7 @@ function criarAlimentoMock(
     fibra: number,
     quantidadeGramas: number,
     referenciaMicronutrientes?: string
-): AlimentoNoPlano {
-    const alimentoReferencia = referenciaMicronutrientes
-        ? alimentosBase.find((alimento) => alimento.nome === referenciaMicronutrientes)
-        : undefined;
-
+): AlimentoMock {
     return {
         id,
         nome,
@@ -71,7 +75,7 @@ function criarAlimentoMock(
         carboidrato_g: carboidrato,
         fibra_g: fibra,
         quantidadeGramas,
-        micronutrientes: alimentoReferencia?.micronutrientes
+        referenciaMicronutrientes
     };
 }
 
@@ -164,7 +168,7 @@ const alimentosMock = {
     tapioca: criarAlimentoMock('tapioca-mock', 'Tapioca', 288, 0.2, 0, 71.9, 0.2, 50)
 };
 
-const cardapiosMock: RefeicaoPlano[][] = [
+const cardapiosMock: RefeicaoMock[][] = [
     [
         { nome: 'Café da manhã', horario: '07:30', alimentos: [alimentosMock.aveia, alimentosMock.banana, alimentosMock.ovo] },
         { nome: 'Lanche da manhã', horario: '10:00', alimentos: [alimentosMock.iogurte, alimentosMock.maca] },
@@ -204,7 +208,17 @@ export function obterPlanoMock(id: number): PlanoMockComRefeicoes | undefined {
         ...plano,
         itens: cardapio.slice(0, plano.refeicoes).map((refeicao) => ({
             ...refeicao,
-            alimentos: refeicao.alimentos.map((alimento) => ({ ...alimento }))
+            alimentos: refeicao.alimentos.map((alimento) => {
+                const { referenciaMicronutrientes, ...alimentoPlano } = alimento;
+                const alimentoReferencia = referenciaMicronutrientes
+                    ? obterAlimentoBasePorNome(referenciaMicronutrientes)
+                    : undefined;
+
+                return {
+                    ...alimentoPlano,
+                    micronutrientes: alimentoReferencia?.micronutrientes
+                };
+            })
         }))
     };
 }
