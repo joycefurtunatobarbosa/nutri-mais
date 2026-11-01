@@ -9,9 +9,9 @@ const menuAberto = ref(false);
     <!-- <main class="landing-page">
         <header class="site-header">
             <div class="container header-content">
-                <RouterLink class="brand" to="/" aria-label="NutriPlanner — início">
+                <RouterLink class="brand" to="/" aria-label="NutriMais — início">
                     <span class="brand-mark">N</span>
-                    <span>Nutri<span class="brand-accent">Planner</span></span>
+                    <span>Nutri<span class="brand-accent">Mais</span></span>
                 </RouterLink>
 
                 <button
@@ -56,12 +56,12 @@ const menuAberto = ref(false);
                     </div>
                 </div>
 
-                <div class="hero-visual" aria-label="Prévia do painel NutriPlanner">
+                <div class="hero-visual" aria-label="Prévia do painel NutriMais">
                     <div class="visual-orbit orbit-one"></div>
                     <div class="visual-orbit orbit-two"></div>
                     <div class="dashboard-preview">
                         <div class="preview-topbar">
-                            <div class="preview-brand"><span class="preview-logo">N</span> NutriPlanner</div>
+                            <div class="preview-brand"><span class="preview-logo">N</span> NutriMais</div>
                             <div class="preview-avatar">JC</div>
                         </div>
                         <div class="preview-content">
@@ -178,7 +178,7 @@ const menuAberto = ref(false);
                 <div>
                     <span class="eyebrow">SEU CONSULTÓRIO MERECE ESSA LEVEZA</span>
                     <h2>Pronto para transformar sua rotina?</h2>
-                    <p>Comece a organizar seus planos e pacientes com o NutriPlanner.</p>
+                    <p>Comece a organizar seus planos e pacientes com o NutriMais.</p>
                 </div>
                 <RouterLink class="button button-light" to="/auth/register">Criar minha conta <span aria-hidden="true">→</span></RouterLink>
             </div>
@@ -186,12 +186,12 @@ const menuAberto = ref(false);
 
         <footer class="site-footer">
             <div class="container footer-content">
-                <RouterLink class="brand" to="/" aria-label="NutriPlanner — início">
+                <RouterLink class="brand" to="/" aria-label="NutriMais — início">
                     <span class="brand-mark">N</span>
-                    <span>Nutri<span class="brand-accent">Planner</span></span>
+                    <span>Nutri<span class="brand-accent">Mais</span></span>
                 </RouterLink>
                 <p>Mais leveza na rotina. Mais cuidado em cada escolha.</p>
-                <span>© {{ new Date().getFullYear() }} NutriPlanner</span>
+                <span>© {{ new Date().getFullYear() }} NutriMais</span>
             </div>
         </footer>
     </main> -->

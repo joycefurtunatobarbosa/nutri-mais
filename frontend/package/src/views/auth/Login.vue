@@ -14,7 +14,7 @@ import LoginForm from '@/components/auth/LoginForm.vue';
                             </div>
                             <h1 class="text-h5 text-center mb-2">Acesse sua conta</h1>
                             <div class="text-body-1 text-muted text-center mb-3">
-                                Entre no NutriPlanner para continuar.
+                                Entre no NutriMais para continuar.
                             </div>
                             <LoginForm />
                             <h6 class="text-h6 text-muted font-weight-medium d-flex justify-center align-center mt-3">

@@ -796,7 +796,10 @@ function gerarPdf() {
         <div class="cabecalho-pagina">
             <div>
                 <div class="caminho-pagina"><RouterLink to="/planos-alimentares">Planos alimentares</RouterLink><span>/</span>{{ planoMockCarregado || planoSalvoId ? 'Abrir plano' : 'Novo plano' }}</div>
-                <h1>{{ planoMockCarregado ? 'Abrir plano alimentar' : planoSalvoId ? 'Editar plano alimentar' : 'Criar plano alimentar' }}</h1>
+                <div class="titulo-com-voltar">
+                    <v-btn icon variant="text" aria-label="Voltar" title="Voltar" class="botao-voltar" to="/planos-alimentares"><v-icon>mdi-arrow-left</v-icon></v-btn>
+                    <h1>{{ planoMockCarregado ? 'Abrir plano alimentar' : planoSalvoId ? 'Editar plano alimentar' : 'Criar plano alimentar' }}</h1>
+                </div>
                 <p class="texto-introdutorio">
                     {{ planoMockCarregado ? 'Plano carregado com dados demonstrativos para visualização e edição.' : planoSalvoId ? 'Atualize os dados e as refeições deste plano alimentar.' : 'Monte as refeições e acompanhe os valores nutricionais de cada alimento.' }}
                 </p>
@@ -1525,6 +1528,8 @@ function gerarPdf() {
 .cabecalho-pagina { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
 .cabecalho-pagina h1 { margin: 10px 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
 .caminho-pagina { color: #7b8893; font-size: 13px; }
+.titulo-com-voltar { display: flex; align-items: center; gap: 8px; }
+.titulo-com-voltar .botao-voltar { margin-left: -8px; margin-top: 4px; }
 .caminho-pagina a { color: #635bff; text-decoration: none; }
 .caminho-pagina span { margin: 0 8px; color: #b6c0c8; }
 .texto-introdutorio, .titulo-secao p, .cartao-nutricao small { margin: 0; color: #7b8893; font-size: 13px; }

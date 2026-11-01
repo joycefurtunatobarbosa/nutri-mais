@@ -135,7 +135,7 @@ async function abrirPlano() {
 <template>
     <main class="pagina-compartilhada">
         <header class="cabecalho-paciente">
-            <div class="marca"><Icon icon="solar:heart-pulse-linear" width="23" /> NutriPlanner</div>
+            <div class="marca"><Icon icon="solar:heart-pulse-linear" width="23" /> NutriMais</div>
             <span>Plano alimentar do paciente</span>
         </header>
 

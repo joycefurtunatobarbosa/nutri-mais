@@ -21,6 +21,26 @@ const MainRoutes = {
             component: () => import('@/views/pacientes/ListaPacientes.vue')
         },
         {
+            name: 'Atendimentos',
+            path: '/atendimentos',
+            component: () => import('@/views/atendimentos/ListaAtendimentos.vue')
+        },
+        {
+            name: 'Novo atendimento',
+            path: '/atendimentos/novo',
+            component: () => import('@/views/atendimentos/FormularioAtendimento.vue')
+        },
+        {
+            name: 'Abrir atendimento',
+            path: '/atendimentos/:id',
+            component: () => import('@/views/atendimentos/FormularioAtendimento.vue')
+        },
+        {
+            name: 'Agendamentos',
+            path: '/agendamentos',
+            component: () => import('@/views/agendamentos/ListaAgendamentos.vue')
+        },
+        {
             name: 'Alterar senha',
             path: '/alterar-senha',
             component: () => import('@/views/conta/AlterarSenha.vue')

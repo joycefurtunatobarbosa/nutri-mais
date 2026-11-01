@@ -81,7 +81,7 @@ export function gerarPdfPlano(dados: DadosPlanoParaPdf): void {
         documento.setFont('helvetica', 'bold');
         documento.setFontSize(15);
         definirCorTexto([99, 91, 255]);
-        documento.text('NutriPlanner', margem, 15);
+        documento.text('NutriMais', margem, 15);
         documento.setFont('helvetica', 'normal');
         documento.setFontSize(9);
         definirCorTexto([123, 136, 147]);

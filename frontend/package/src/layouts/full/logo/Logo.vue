@@ -5,7 +5,7 @@ import { RouterLink } from 'vue-router';
     <div class="marca">
         <RouterLink to="/" class="marca-link">
             <span class="marca-icone">N</span>
-            <span class="marca-nome">Nutri<span>Planner</span></span>
+            <span class="marca-nome">Nutri<span>Mais</span></span>
         </RouterLink>
     </div>
 </template>

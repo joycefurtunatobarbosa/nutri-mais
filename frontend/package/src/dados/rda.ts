@@ -1,5 +1,5 @@
-import dadosRdaJson from '@/data/rda/DRIs_RDA.json';
-import dadosUlJson from '@/data/rda/UL.json';
+import dadosRdaJson from '@/data/DRI/DRIs_RDA.json';
+import dadosUlJson from '@/data/DRI/UL.json';
 import type { Micronutrientes } from './alimentos';
 import { calcularIdadeEmMeses, type GrupoRDA, type Paciente } from './pacientes';
 
